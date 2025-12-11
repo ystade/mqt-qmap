@@ -11,6 +11,10 @@ This project adheres to [Semantic Versioning], with the exception that minor rel
 
 _If you are upgrading: please see [`UPGRADING.md`](UPGRADING.md#unreleased)._
 
+### Added
+
+- ✨ Add relaxed routing method to the zoned neutral atom compiler ([#859]) ([**@ystade**])
+
 ### Changed
 
 - 👷 Stop testing on `ubuntu-22.04` and `ubuntu-22.04-arm` runners ([#874]) ([**@denialhaag**])
@@ -169,6 +173,7 @@ _📚 Refer to the [GitHub Release Notes] for previous changelogs._
 <!-- PR links -->
 
 [#874]: https://github.com/munich-quantum-toolkit/qmap/pull/874
+[#859]: https://github.com/munich-quantum-toolkit/qmap/pull/859
 [#848]: https://github.com/munich-quantum-toolkit/qmap/pull/848
 [#847]: https://github.com/munich-quantum-toolkit/qmap/pull/847
 [#832]: https://github.com/munich-quantum-toolkit/qmap/pull/832

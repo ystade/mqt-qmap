@@ -15,6 +15,7 @@
 #include "na/zoned/layout_synthesizer/PlaceAndRouteSynthesizer.hpp"
 #include "na/zoned/layout_synthesizer/placer/AStarPlacer.hpp"
 #include "na/zoned/layout_synthesizer/placer/VertexMatchingPlacer.hpp"
+#include "na/zoned/layout_synthesizer/router/IndependentSetRouter.hpp"
 
 #include <cstddef>
 // The header <nlohmann/json.hpp> is used, but clang-tidy confuses it with the
@@ -24,6 +25,7 @@
 #include <pybind11/attr.h>
 #include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
+#include <pybind11/native_enum.h>
 #include <pybind11/pybind11.h>
 // NOLINTNEXTLINE(misc-include-cleaner)
 #include <pybind11_json/pybind11_json.hpp>
@@ -52,6 +54,17 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
                    });
 
   //===--------------------------------------------------------------------===//
+  // Routing Method Enum
+  //===--------------------------------------------------------------------===//
+  py::native_enum<na::zoned::IndependentSetRouter::Config::Method>(
+      m, "RoutingMethod", "enum.Enum")
+      .value("strict", na::zoned::IndependentSetRouter::Config::Method::STRICT)
+      .value("relaxed",
+             na::zoned::IndependentSetRouter::Config::Method::RELAXED)
+      .export_values()
+      .finalize();
+
+  //===--------------------------------------------------------------------===//
   // Routing-agnostic Compiler
   //===--------------------------------------------------------------------===//
   py::class_<na::zoned::RoutingAgnosticCompiler> routingAgnosticCompiler(
@@ -63,7 +76,9 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
                     const std::string& logLevel, const double maxFillingFactor,
                     const bool useWindow, const size_t windowSize,
                     const bool dynamicPlacement,
-                    const bool warnUnsupportedGates)
+                    const na::zoned::IndependentSetRouter::Config::Method
+                        routingMethod,
+                    const double preferSplit, const bool warnUnsupportedGates)
                      -> na::zoned::RoutingAgnosticCompiler {
           na::zoned::RoutingAgnosticCompiler::Config config;
           config.logLevel = spdlog::level::from_str(logLevel);
@@ -72,6 +87,8 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
               .useWindow = useWindow,
               .windowSize = windowSize,
               .dynamicPlacement = dynamicPlacement};
+          config.layoutSynthesizerConfig.routerConfig = {
+              .method = routingMethod, .preferSplit = preferSplit};
           config.codeGeneratorConfig = {.warnUnsupportedGates =
                                             warnUnsupportedGates};
           return {arch, config};
@@ -85,6 +102,10 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
             defaultConfig.layoutSynthesizerConfig.placerConfig.windowSize,
         "dynamic_placement"_a =
             defaultConfig.layoutSynthesizerConfig.placerConfig.dynamicPlacement,
+        "routing_method"_a =
+            defaultConfig.layoutSynthesizerConfig.routerConfig.method,
+        "prefer_split"_a =
+            defaultConfig.layoutSynthesizerConfig.routerConfig.preferSplit,
         "warn_unsupported_gates"_a =
             defaultConfig.codeGeneratorConfig.warnUnsupportedGates);
   }
@@ -125,7 +146,10 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
                     const double windowRatio, const double windowShare,
                     const float deepeningFactor, const float deepeningValue,
                     const float lookaheadFactor, const float reuseLevel,
-                    const size_t maxNodes, const bool warnUnsupportedGates)
+                    const size_t maxNodes,
+                    const na::zoned::IndependentSetRouter::Config::Method
+                        routingMethod,
+                    const double preferSplit, const bool warnUnsupportedGates)
                      -> na::zoned::RoutingAwareCompiler {
           na::zoned::RoutingAwareCompiler::Config config;
           config.logLevel = spdlog::level::from_str(logLevel);
@@ -139,7 +163,10 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
               .deepeningValue = deepeningValue,
               .lookaheadFactor = lookaheadFactor,
               .reuseLevel = reuseLevel,
-              .maxNodes = maxNodes};
+              .maxNodes = maxNodes,
+          };
+          config.layoutSynthesizerConfig.routerConfig = {
+              .method = routingMethod, .preferSplit = preferSplit};
           config.codeGeneratorConfig = {.warnUnsupportedGates =
                                             warnUnsupportedGates};
           return {arch, config};
@@ -165,6 +192,10 @@ PYBIND11_MODULE(MQT_QMAP_MODULE_NAME, m, py::mod_gil_not_used()) {
             defaultConfig.layoutSynthesizerConfig.placerConfig.reuseLevel,
         "max_nodes"_a =
             defaultConfig.layoutSynthesizerConfig.placerConfig.maxNodes,
+        "routing_method"_a =
+            defaultConfig.layoutSynthesizerConfig.routerConfig.method,
+        "prefer_split"_a =
+            defaultConfig.layoutSynthesizerConfig.routerConfig.preferSplit,
         "warn_unsupported_gates"_a =
             defaultConfig.codeGeneratorConfig.warnUnsupportedGates);
   }

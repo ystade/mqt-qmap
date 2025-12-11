@@ -8,6 +8,8 @@
 
 """Python bindings module for MQT QMAP's Zoned Neutral Atom Compiler."""
 
+from enum import Enum
+
 from mqt.core.ir import QuantumComputation
 
 class ZonedNeutralAtomArchitecture:
@@ -52,6 +54,20 @@ class ZonedNeutralAtomArchitecture:
             the architecture as a .namachine string
         """
 
+class RoutingMethod(Enum):
+    """Enumeration of the available routing methods for the independent set router."""
+
+    strict = ...
+    """
+    Strict routing, i.e., the relative order of atoms must be
+    maintained throughout a movement.
+    """
+    relaxed = ...
+    """
+    Relaxed routing, i.e., the relative order of atoms may change
+    throughout a movement by applying offsets during pick-up and drop-off.
+    """
+
 class RoutingAgnosticCompiler:
     """MQT QMAP's routing-agnostic Zoned Neutral Atom Compiler."""
 
@@ -63,7 +79,8 @@ class RoutingAgnosticCompiler:
         use_window: bool = ...,
         window_size: int = ...,
         dynamic_placement: bool = ...,
-        parking_offset: int = ...,
+        routing_method: RoutingMethod = ...,
+        prefer_split: float = ...,
         warn_unsupported_gates: bool = ...,
     ) -> None:
         """Create a routing-agnostic compiler for the given architecture and configurations.
@@ -72,12 +89,17 @@ class RoutingAgnosticCompiler:
             arch: is the zoned neutral atom architecture
             log_level: is the log level for the compiler, possible values are
                 "debug", "info", "warning", "error", "critical"
-            max_filling_factor: is the maximum filling factor for the entanglement zone, i.e., it sets the limit for the maximum number of entangling gates that are scheduled in parallel
+            max_filling_factor: is the maximum filling factor for the entanglement zone, i.e.,
+                it sets the limit for the maximum number of entangling gates that are
+                scheduled in parallel
             use_window: whether to use a window for the placer
             window_size: the size of the window for the placer
             dynamic_placement: whether to use dynamic placement for the placer
-            parking_offset: the parking offset of the code generator
-            warn_unsupported_gates: whether to warn about unsupported gates in the code generator
+            routing_method: is the routing method that should be used for the
+                independent set router
+            prefer_split: is the threshold factor for group merging decisions during routing.
+            warn_unsupported_gates: whether to warn about unsupported gates in the code
+                generator
         """
     @classmethod
     def from_json_string(cls, arch: ZonedNeutralAtomArchitecture, json: str) -> RoutingAgnosticCompiler:
@@ -126,7 +148,8 @@ class RoutingAwareCompiler:
         lookahead_factor: float = ...,
         reuse_level: float = ...,
         max_nodes: int = ...,
-        parking_offset: int = ...,
+        routing_method: RoutingMethod = ...,
+        prefer_split: float = ...,
         warn_unsupported_gates: bool = ...,
     ) -> None:
         """Create a routing-aware compiler for the given architecture and configurations.
@@ -135,7 +158,9 @@ class RoutingAwareCompiler:
             arch: is the zoned neutral atom architecture
             log_level: is the log level for the compiler, possible values are
                 "debug", "info", "warning", "error", "critical"
-            max_filling_factor: is the maximum filling factor for the entanglement zone, i.e., it sets the limit for the maximum number of entangling gates that are scheduled in parallel
+            max_filling_factor: is the maximum filling factor for the entanglement zone,
+                i.e., it sets the limit for the maximum number of entangling gates that
+                are scheduled in parallel
             use_window: is a flag whether to use a window for the placer
             window_min_width: is the minimum width of the window for the placer
             window_ratio: is the ratio between the height and the width of the window
@@ -158,7 +183,9 @@ class RoutingAwareCompiler:
                 is raised. In the current implementation, one node roughly consumes 120
                 Byte. Hence, allowing 50,000,000 nodes results in memory consumption of
                 about 6 GB plus the size of the rest of the data structures.
-            parking_offset: is the parking offset of the code generator
+            routing_method: is the routing method that should be used for the
+                independent set router
+            prefer_split: is the threshold factor for group merging decisions during routing.
             warn_unsupported_gates: is a flag whether to warn about unsupported gates
                 in the code generator
         """
