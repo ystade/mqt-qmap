@@ -13,10 +13,18 @@ _If you are upgrading: please see [`UPGRADING.md`](UPGRADING.md#unreleased)._
 
 ### Changed
 
+- 👷 Stop testing on `ubuntu-22.04` and `ubuntu-22.04-arm` runners ([#874]) ([**@denialhaag**])
+- 👷 Stop testing with `clang-19` and start testing with `clang-21` ([#874]) ([**@denialhaag**])
+- 👷 Fix macOS tests with Homebrew Clang via new `munich-quantum-toolkit/workflows` version ([#874]) ([**@denialhaag**])
+- 👷 Re-enable macOS tests with GCC by disabling module scanning ([#874]) ([**@denialhaag**])
 - ✨ Enable code generation for relaxed routing constraints ([#848]) ([**@ystade**])
 - ✨ Add `max_filling_factor` to scheduler in Zoned Neutral Atom Compiler ([#847]) ([**@ystade**])
 - ✨ Added extension to the hybrid routing mapper to also support Bridge gates, Passby moves and Flying ancillas ([#832]) ([**@lsschmid**])
 - ✨ Added hybrid synthesis routing for iterative circuit constructions ([#832]) ([**@lsschmid**])
+
+### Removed
+
+- 🔥 Remove wheel builds for Python 3.13t ([#874]) ([**@denialhaag**])
 
 ## [3.4.0] - 2025-10-15
 
@@ -160,6 +168,7 @@ _📚 Refer to the [GitHub Release Notes] for previous changelogs._
 
 <!-- PR links -->
 
+[#874]: https://github.com/munich-quantum-toolkit/qmap/pull/874
 [#848]: https://github.com/munich-quantum-toolkit/qmap/pull/848
 [#847]: https://github.com/munich-quantum-toolkit/qmap/pull/847
 [#832]: https://github.com/munich-quantum-toolkit/qmap/pull/832
