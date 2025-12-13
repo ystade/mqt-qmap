@@ -15,7 +15,7 @@
 #include "ir/QuantumComputation.hpp"
 #include "ir/operations/Operation.hpp"
 #include "layout_synthesizer/PlaceAndRouteSynthesizer.hpp"
-#include "layout_synthesizer/placer/AStarPlacer.hpp"
+#include "layout_synthesizer/placer/HeuristicPlacer.hpp"
 #include "layout_synthesizer/placer/VertexMatchingPlacer.hpp"
 #include "layout_synthesizer/router/IndependentSetRouter.hpp"
 #include "na/NAComputation.hpp"
@@ -269,7 +269,7 @@ public:
 };
 
 class RoutingAwareSynthesizer
-    : public PlaceAndRouteSynthesizer<RoutingAwareSynthesizer, AStarPlacer,
+    : public PlaceAndRouteSynthesizer<RoutingAwareSynthesizer, HeuristicPlacer,
                                       IndependentSetRouter> {
 public:
   RoutingAwareSynthesizer(const Architecture& architecture,

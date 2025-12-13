@@ -54,6 +54,18 @@ class ZonedNeutralAtomArchitecture:
             the architecture as a .namachine string
         """
 
+class PlacementMethod(Enum):
+    """Enumeration of the available placement methods for the heuristic placer."""
+
+    astar = ...
+    """
+    A-star algorithm
+    """
+    ids = ...
+    """
+    Iterative diving search
+    """
+
 class RoutingMethod(Enum):
     """Enumeration of the available routing methods for the independent set router."""
 
@@ -143,11 +155,14 @@ class RoutingAwareCompiler:
         window_min_width: int = ...,
         window_ratio: float = ...,
         window_share: float = ...,
+        placement_method: PlacementMethod = ...,
         deepening_factor: float = ...,
         deepening_value: float = ...,
         lookahead_factor: float = ...,
         reuse_level: float = ...,
         max_nodes: int = ...,
+        trials: int = ...,
+        queue_capacity: int = ...,
         routing_method: RoutingMethod = ...,
         prefer_split: float = ...,
         warn_unsupported_gates: bool = ...,
@@ -166,6 +181,8 @@ class RoutingAwareCompiler:
             window_ratio: is the ratio between the height and the width of the window
             window_share: is the share of free sites in the window in relation to the
                 number of atoms to be moved in this step
+            placement_method: is the placement method that should be used for the heuristic
+                placer
             deepening_factor: controls the impact of the term in the heuristic of the
                 A* search that resembles the standard deviation of the differences
                 between the current and target sites of the atoms to be moved in every
@@ -183,6 +200,8 @@ class RoutingAwareCompiler:
                 is raised. In the current implementation, one node roughly consumes 120
                 Byte. Hence, allowing 50,000,000 nodes results in memory consumption of
                 about 6 GB plus the size of the rest of the data structures.
+            trials: is the number of restarts during IDS.
+            queue_capacity: is the maximum capacity of the priority queue used during IDS.
             routing_method: is the routing method that should be used for the
                 independent set router
             prefer_split: is the threshold factor for group merging decisions during routing.

@@ -8,7 +8,7 @@
  * Licensed under the MIT License
  */
 
-#include "na/zoned/layout_synthesizer/placer/AStarPlacer.hpp"
+#include "na/zoned/layout_synthesizer/placer/HeuristicPlacer.hpp"
 
 #include <cstddef>
 #include <gmock/gmock-function-mocker.h>
@@ -45,6 +45,7 @@ constexpr std::string_view configJson = R"({
   "windowMinWidth": 4,
   "windowRatio": 1.5,
   "windowShare": 0.6,
+  "method": "astar",
   "deepeningFactor": 0.6,
   "deepeningValue": 0.2,
   "lookaheadFactor": 0.2,
@@ -53,12 +54,12 @@ constexpr std::string_view configJson = R"({
 class AStarPlacerPlaceTest : public ::testing::Test {
 protected:
   Architecture architecture;
-  AStarPlacer::Config config;
-  AStarPlacer placer;
+  HeuristicPlacer::Config config;
+  HeuristicPlacer placer;
   AStarPlacerPlaceTest()
       : architecture(Architecture::fromJSONString(architectureJson)),
         config(nlohmann::json::parse(configJson)
-                   .template get<AStarPlacer::Config>()),
+                   .template get<HeuristicPlacer::Config>()),
         placer(architecture, config) {}
 };
 TEST_F(AStarPlacerPlaceTest, Empty) {
@@ -219,19 +220,20 @@ TEST_F(AStarPlacerPlaceTest, TwoTwoQubitLayerReuse) {
   EXPECT_EQ(std::get<1>(placement[2][1]), std::get<1>(placement[3][1]));
   EXPECT_EQ(std::get<2>(placement[2][1]), std::get<2>(placement[3][1]));
 }
-TEST(AStarPlacerTest, NoSolution) {
+TEST(HeuristicPlacerTest, NoSolution) {
   Architecture architecture(Architecture::fromJSONString(architectureJson));
-  AStarPlacer::Config config = R"({
+  HeuristicPlacer::Config config = R"({
   "useWindow": true,
   "windowMinWidth": 0,
   "windowRatio": 1.0,
   "windowShare": 0.0,
+  "method": "astar",
   "deepeningFactor": 0.6,
   "deepeningValue": 0.2,
   "lookaheadFactor": 0.2,
   "reuseLevel": 5.0
 })"_json;
-  AStarPlacer placer(architecture, config);
+  HeuristicPlacer placer(architecture, config);
   constexpr size_t nQubits = 2;
   EXPECT_THROW(
       std::ignore = placer.place(
@@ -240,34 +242,36 @@ TEST(AStarPlacerTest, NoSolution) {
           std::vector<std::unordered_set<qc::Qubit>>{}),
       std::runtime_error);
 }
-TEST(AStarPlacerTest, LimitSpace) {
+TEST(HeuristicPlacerTest, LimitSpace) {
   Architecture architecture(Architecture::fromJSONString(architectureJson));
-  AStarPlacer placer(architecture, R"({
+  HeuristicPlacer placer(architecture, R"({
   "useWindow": true,
   "windowMinWidth": 4,
   "windowRatio": 1.5,
   "windowShare": 0.6,
+  "method": "astar",
   "deepeningFactor": 0.6,
   "deepeningValue": 0.2,
   "lookaheadFactor": 0.2,
   "reuseLevel": 5.0,
   "maxNodes": 2
 })"_json);
-  constexpr size_t nQubits = 4;
+  constexpr size_t nQubits = 8;
   EXPECT_THROW(std::ignore = placer.place(
                    nQubits,
                    std::vector<std::vector<std::array<qc::Qubit, 2>>>{
-                       {{0U, 1U}, {2U, 3U}}},
+                       {{0U, 1U}, {2U, 3U}, {4U, 5U}, {6U, 7U}}},
                    std::vector<std::unordered_set<qc::Qubit>>{}),
                std::runtime_error);
 }
-TEST(AStarPlacerTest, WindowExpansion) {
+TEST(HeuristicPlacerTest, WindowExpansion) {
   Architecture architecture(Architecture::fromJSONString(architectureJson));
-  AStarPlacer placer(architecture, R"({
+  HeuristicPlacer placer(architecture, R"({
   "useWindow": true,
   "windowMinWidth": 1,
   "windowRatio": 1.0,
   "windowShare": 1.0,
+  "method": "astar",
   "deepeningFactor": 0.6,
   "deepeningValue": 0.2,
   "lookaheadFactor": 0.2,
@@ -280,7 +284,7 @@ TEST(AStarPlacerTest, WindowExpansion) {
                           {{0U, 3U}, {1U, 2U}}},
                       std::vector<std::unordered_set<qc::Qubit>>{}));
 }
-TEST(AStarPlacerTest, InitialPlacementForTwoSLMs) {
+TEST(HeuristicPlacerTest, InitialPlacementForTwoSLMs) {
   const auto architecture = Architecture::fromJSON(R"({
   "name": "a_star_placer_architecture",
   "storage_zones": [{
@@ -303,7 +307,7 @@ TEST(AStarPlacerTest, InitialPlacementForTwoSLMs) {
   "aods":[{"id": 0, "site_separation": 2, "r": 20, "c": 20}],
   "rydberg_range": [[[5, 70], [55, 110]]]
 })"_json);
-  AStarPlacer placer(architecture, nlohmann::json::parse(configJson));
+  HeuristicPlacer placer(architecture, nlohmann::json::parse(configJson));
   constexpr size_t nQubits = 50;
   const auto& placement = placer.place(
       nQubits, std::vector<std::vector<std::array<qc::Qubit, 2>>>{},
@@ -315,7 +319,7 @@ TEST(AStarPlacerTest, InitialPlacementForTwoSLMs) {
                   ::testing::Field(&SLM::id, ::testing::Eq(1)),
                   ::testing::Lt(18), ::testing::Lt(20)))));
 }
-TEST(AStarPlacerTest, AStarSearch) {
+TEST(HeuristicPlacerTest, AStarSearch) {
   // for testing purposes, we do not use the structure of nodes and just use
   // their respective address to identify a location in a 4x4 grid that looks
   // like the following, where the cost of each edge is 1:
@@ -337,56 +341,59 @@ TEST(AStarPlacerTest, AStarSearch) {
   // ┌─────┐        ┌─────┐        ┌Goal=┐        ┌─────┐
   // │  12 ├─────→  │  13 ├─────→  │  14 ├─────→  │  15 │
   // └─────┘        └─────┘        └=====┘        └─────┘
-  const std::vector<AStarPlacer::AtomNode> nodes(16);
-  std::unordered_map<
-      const AStarPlacer::AtomNode*,
-      std::vector<std::reference_wrapper<const AStarPlacer::AtomNode>>>
-      neighbors{{nodes.data(), {std::cref(nodes[1]), std::cref(nodes[4])}},
-                {&nodes[1], {std::cref(nodes[2]), std::cref(nodes[5])}},
-                {&nodes[2], {std::cref(nodes[3]), std::cref(nodes[6])}},
-                {&nodes[3], {std::cref(nodes[7])}},
-                {&nodes[4], {std::cref(nodes[5]), std::cref(nodes[8])}},
-                {&nodes[5], {std::cref(nodes[6]), std::cref(nodes[9])}},
-                {&nodes[6], {std::cref(nodes[7]), std::cref(nodes[10])}},
-                {&nodes[7], {std::cref(nodes[11])}},
-                {&nodes[8], {std::cref(nodes[9]), std::cref(nodes[12])}},
-                {&nodes[9], {std::cref(nodes[10]), std::cref(nodes[13])}},
-                {&nodes[10], {std::cref(nodes[11]), std::cref(nodes[14])}},
-                {&nodes[11], {std::cref(nodes[15])}},
-                {&nodes[12], {std::cref(nodes[13])}},
-                {&nodes[13], {std::cref(nodes[14])}},
-                {&nodes[14], {std::cref(nodes[15])}},
-                {&nodes[15], {}}};
-  const auto path = (AStarPlacer::aStarTreeSearch<AStarPlacer::AtomNode>(
+  struct Node {
+    double distanceToGoal = 0;
+    std::vector<std::shared_ptr<const Node>> neighbors{};
+    explicit Node(const double d) : distanceToGoal(d) {}
+  };
+  const std::vector nodes{
+      std::make_shared<Node>(std::hypot(2, 3)),
+      std::make_shared<Node>(std::hypot(1, 3)),
+      std::make_shared<Node>(std::hypot(0, 3)),
+      std::make_shared<Node>(std::hypot(1, 3)),
+      std::make_shared<Node>(std::hypot(2, 2)),
+      std::make_shared<Node>(std::hypot(1, 2)),
+      std::make_shared<Node>(std::hypot(0, 2)),
+      std::make_shared<Node>(std::hypot(1, 2)),
+      std::make_shared<Node>(std::hypot(2, 1)),
+      std::make_shared<Node>(std::hypot(1, 1)),
+      std::make_shared<Node>(std::hypot(0, 1)),
+      std::make_shared<Node>(std::hypot(1, 1)),
+      std::make_shared<Node>(std::hypot(2, 0)),
+      std::make_shared<Node>(std::hypot(1, 0)),
+      std::make_shared<Node>(std::hypot(0, 0)),
+      std::make_shared<Node>(std::hypot(1, 0)),
+  };
+  nodes[0]->neighbors = {nodes[1], nodes[4]};
+  nodes[1]->neighbors = {nodes[2], nodes[5]};
+  nodes[2]->neighbors = {nodes[3], nodes[6]};
+  nodes[3]->neighbors = {nodes[7]};
+  nodes[4]->neighbors = {nodes[5], nodes[8]};
+  nodes[5]->neighbors = {nodes[6], nodes[9]};
+  nodes[6]->neighbors = {nodes[7], nodes[10]};
+  nodes[7]->neighbors = {nodes[11]};
+  nodes[8]->neighbors = {nodes[9], nodes[12]};
+  nodes[9]->neighbors = {nodes[10], nodes[13]};
+  nodes[10]->neighbors = {nodes[11], nodes[14]};
+  nodes[11]->neighbors = {nodes[15]};
+  nodes[12]->neighbors = {nodes[13]};
+  nodes[13]->neighbors = {nodes[14]};
+  nodes[14]->neighbors = {nodes[15]};
+  const auto goal = HeuristicPlacer::aStarTreeSearch<Node>(
       /* start: */
       nodes[0],
       /* getNeighbors: */
-      [&neighbors](const AStarPlacer::AtomNode& node)
-          -> std::vector<std::reference_wrapper<const AStarPlacer::AtomNode>> {
-        return neighbors.at(&node);
+      [](std::shared_ptr<const Node> node)
+          -> std::vector<std::shared_ptr<const Node>> {
+        return node->neighbors;
       },
       /* isGoal: */
-      [&nodes](const AStarPlacer::AtomNode& node) -> bool {
-        return &node == &nodes[14];
-      },
+      [&nodes](const Node& node) -> bool { return &node == nodes[14].get(); },
       /* getCost: */
-      [](const AStarPlacer::AtomNode& /* unused */) -> double { return 1.0; },
+      [](const Node& /* unused */) -> double { return 1.0; },
       /* getHeuristic: */
-      [&nodes](const AStarPlacer::AtomNode& node) -> double {
-        const auto* head = nodes.data();
-        const auto i = std::distance(head, &node);
-        const long x = i % 4;
-        const long y = i / 4;
-        return std::hypot(x, y);
-      },
-      1'000'000));
-  // convert to const Node* for easier comparison
-  std::vector<const AStarPlacer::AtomNode*> pathNodes;
-  for (const auto& node : path) {
-    pathNodes.emplace_back(&node.get());
-  }
-  EXPECT_THAT(pathNodes,
-              ::testing::ElementsAre(&nodes[0], ::testing::_, ::testing::_,
-                                     ::testing::_, ::testing::_, &nodes[14]));
+      [](const Node& node) -> double { return node.distanceToGoal; },
+      1'000'000);
+  EXPECT_EQ(goal, nodes[14]);
 }
 } // namespace na::zoned
