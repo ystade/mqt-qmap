@@ -46,6 +46,242 @@ private:
   Config config_;
 
 public:
+  class FlowNetwork {
+  public:
+    using VertexIndex = size_t;
+    using EdgeIndex = size_t;
+    using FlowQuantity = int64_t;
+    using CapacityValue = uint64_t;
+    using CostValue = int64_t;
+
+    /// Wrapper around a vector that allows to specify the index type.
+    template <std::unsigned_integral I, typename T>
+    class IVector : std::vector<T> {
+    public:
+      using typename std::vector<T>::value_type;
+      using std::vector<T>::vector;
+      using std::vector<T>::empty;
+      using std::vector<T>::emplace_back;
+      using std::vector<T>::clear;
+      using std::vector<T>::shrink_to_fit;
+      using std::vector<T>::assign;
+      using std::vector<T>::begin;
+      using std::vector<T>::cbegin;
+      using std::vector<T>::end;
+      using std::vector<T>::resize;
+      [[nodiscard]] auto operator[](I index) const -> const T& {
+        return std::vector<T>::operator[](
+            static_cast<std::vector<T>::size_type>(index));
+      }
+      [[nodiscard]] auto operator[](I index) -> T& {
+        return std::vector<T>::operator[](
+            static_cast<std::vector<T>::size_type>(index));
+      }
+      auto reserve(I index) -> void {
+        return std::vector<T>::reserve(
+            static_cast<std::vector<T>::size_type>(index));
+      }
+      [[nodiscard]] constexpr auto size() const -> I {
+        return I(std::vector<T>::size());
+      }
+    };
+
+  private:
+    //===------------------------------------------------------------------===//
+    // Vertex data
+    //===------------------------------------------------------------------===//
+    /// Supply of flow at each vertex; demand is expressed as negative supply.
+    IVector<VertexIndex, FlowQuantity> vertexSupply_;
+    /**
+     * Used to store the excess of vertices of a pre-flow during the computation
+     * of the actual flow.
+     */
+    IVector<VertexIndex, FlowQuantity> vertexExcess_;
+    /**
+     * During the calculation of the max flow, the potential is a measure of
+     * distance to the sink. The sink always has potential 0, and the source's
+     * potential is equal to the number of vertices.
+     */
+    IVector<VertexIndex, VertexIndex> vertexPotential_;
+    /**
+     * For fast and cache-efficient access of all successors. It is a vector
+     * whose values denote the index in the edgeTarget_ vector where the
+     * successors of this vertex start.
+     */
+    IVector<VertexIndex, EdgeIndex> vertexFirstOutgoingEdge_;
+    /**
+     * Every edge in the graph has a corresponding reverse edge. The following
+     * data structure is analogue to the one above.
+     */
+    IVector<VertexIndex, EdgeIndex> vertexFirstOutgoingReverseEdge_;
+
+    //===------------------------------------------------------------------===//
+    // Edge data
+    //===------------------------------------------------------------------===//
+    /**
+     * Stores the target vertex of each (forward) edge. More precisely, the
+     * target vertex of the i-th edge is stored as the i-th element in the
+     * vector.
+     */
+    IVector<EdgeIndex, VertexIndex> edgeTarget_;
+    /**
+     * Stores the target vertex of each reverse edge. More precisely, the target
+     * vertex of the i-th reverse edge is stored as the i-th element in the
+     * vector. Note that the actual indices of reverse edges are shifted by the
+     * number of (forward) edges, i.e., they start with m, where m is the number
+     * of (forward) edges. Also note that this vector is used to retrieve the
+     * source vertex of (forward) edges.
+     */
+    IVector<EdgeIndex, VertexIndex> reverseEdgeTarget_;
+    /**
+     * The capacity of each edge denotes the maximum possible flow along this
+     * (forward) edge. The capacity of the i-th edge is stored as the i-th
+     * element in this vector.
+     */
+    IVector<EdgeIndex, FlowQuantity> edgeCapacity_;
+    /**
+     * The unit cost is the cost per unit of flow along this forward edge. To
+     * retrieve the actual cost, the unit cost is multiplied with the flow along
+     * this edge. The unit cost of the i-th edge is the i-th element in the
+     * vector.
+     */
+    IVector<EdgeIndex, CostValue> edgeUnitCost_;
+    /**
+     * Is used during the calculation of the flow and stores the finally
+     * calculated flow in the flow network.
+     */
+    IVector<EdgeIndex, FlowQuantity> edgeFlow_;
+    /**
+     * For each edge, it maps to the index of the reverse edge. Note that the
+     * indices of reverse edges start with m, where m is the number of (forward)
+     * edges.
+     */
+    IVector<EdgeIndex, EdgeIndex> reverseEdge_;
+    /**
+     * Is used during the calculation of the flow and stores the current
+     * capacities along all (forward and reverse) edges in the residual graph.
+     * Note that one can derive the flow in the residual graph from its
+     * capacities as follows:
+     * - For forward edges e: flow(e) = 0 - flow(rev(e))
+     *                                = capacity(rev(e)) - flow(rev(e))
+     *                                = residualCapacity(rev(e))
+     * - For reverse edges e: flow(e) = - residualCapacity(e)
+     */
+    IVector<EdgeIndex, FlowQuantity> residualEdgeCapacity_;
+    // todo(yannick): add docstring
+    IVector<VertexIndex, std::optional<EdgeIndex>> firstAdmissibleEdge;
+
+    //===------------------------------------------------------------------===//
+    // Global variables
+    //===------------------------------------------------------------------===//
+    /// Whether the graph is already finalized and the flow can be calculated.
+    bool isBuilt = false;
+    /// The resulting optimal cost of the min-cost flow.
+    uint64_t optimalCost = 0;
+    /// The resulting flow of the min-cost flow.
+    int64_t maximumFlow_ = 0;
+
+  public:
+    FlowNetwork() = default;
+    FlowNetwork(size_t reserveNumVertices, size_t reserveNumEdges);
+
+    [[nodiscard]] constexpr auto hasZeroVertices() const -> bool {
+      return vertexSupply_.empty();
+    }
+    [[nodiscard]] constexpr auto getNumVertices() const -> VertexIndex {
+      return vertexSupply_.size();
+    }
+    [[nodiscard]] constexpr auto getNumEdges() const -> EdgeIndex {
+      return edgeTarget_.size();
+    }
+    auto validateVertexIndex(VertexIndex i) const -> void;
+    auto validateEdgeIndex(EdgeIndex i) const -> void;
+    auto ensureBuilt() const -> void;
+    auto ensureNotBuilt() const -> void;
+    static auto toFlowQuantityWithOverflowCheck(CapacityValue capacity)
+        -> FlowQuantity;
+    [[nodiscard]] auto getOutDegree(VertexIndex v) const -> EdgeIndex;
+    [[nodiscard]] auto getOutgoing(VertexIndex v) const
+        -> std::ranges::iota_view<EdgeIndex, EdgeIndex>;
+    [[nodiscard]] auto getSuccessors(VertexIndex v) const
+        -> std::span<const VertexIndex>;
+    [[nodiscard]] auto isReverseEdge(EdgeIndex i) const -> bool;
+    [[nodiscard]] auto getReverseEdge(EdgeIndex i) const -> EdgeIndex;
+    [[nodiscard]] auto getSource(EdgeIndex i) const -> VertexIndex;
+    [[nodiscard]] auto getTarget(EdgeIndex i) const -> VertexIndex;
+
+    auto initializePreflow(const VertexIndex source) -> void {
+      vertexExcess_.assign(getNumVertices(), 0);
+      vertexPotential_.assign(getNumVertices(), 0);
+      vertexPotential_[source] = getNumVertices();
+      residualEdgeCapacity_.clear();
+      std::ranges::for_each(edgeCapacity_,
+                            [&](const FlowQuantity capacity) -> void {
+                              residualEdgeCapacity_.emplace_back(capacity);
+                            });
+      residualEdgeCapacity_.resize(2 * getNumEdges(), 0);
+      firstAdmissibleEdge.assign(getNumVertices(), std::nullopt);
+    }
+    auto solveMaxFlow(const VertexIndex source, const VertexIndex sink)
+        -> void {
+      ensureBuilt();
+      validateVertexIndex(source);
+      validateVertexIndex(sink);
+      if (source == sink) {
+        throw std::invalid_argument("Source and sink cannot be the same.");
+      }
+      initializePreflow(source);
+      // todo(yannick) implement push relabel algorithm
+    }
+    auto addVertexWithSupply(int64_t supply) -> VertexIndex;
+    auto addEdgeWithCapacityAndUnitCost(VertexIndex source, VertexIndex target,
+                                        uint64_t capacity, int64_t unitCost)
+        -> EdgeIndex;
+    template <typename T>
+    static auto
+    applyPermutation(const IVector<EdgeIndex, EdgeIndex>& permutation,
+                     IVector<EdgeIndex, T>& data) -> void {
+      IVector<EdgeIndex, T> data_copy = data;
+      for (EdgeIndex i = 0; i < permutation.size(); ++i) {
+        data[permutation[i]] = data_copy[i];
+      }
+    }
+    /**
+     * @brief Finalizes the graph structure for efficient access afterward.
+     * @note This function must be called before calling @ref solve. Vice versa,
+     * @ref addVertexWithSupply and @ref addEdgeWithCapacityAndUnitCost must be
+     * called before calling this function.
+     * @details This function reorders the edges such that they are sorted by
+     * their source vertex. Furthermore, it initializes a vector that carries
+     * the index to the first target vertex for each source vertex. This makes
+     * iteration over outgoing edges more efficient. In particular, it makes
+     * access to edges and associated data, e.g., capacity more cache efficient.
+     */
+    auto build() -> IVector<EdgeIndex, EdgeIndex>;
+    enum class Status {
+      OPTIMAL,
+      INFEASIBLE,
+      UNBALANCED,
+    };
+    auto solveMinCostFlow() -> Status {
+      if (!isBuilt) {
+        throw std::logic_error(
+            "Call `build()` before solving the flow network.");
+      }
+      optimalCost = 0;
+      maximumFlow_ = 0;
+      // todo(yannick): implement min-cost flow algorithm
+      return Status::OPTIMAL;
+    }
+    [[nodiscard]] auto getOptimalCost() const -> uint64_t {
+      return optimalCost;
+    }
+    [[nodiscard]] auto getMaximumFlow() const -> int64_t {
+      return maximumFlow_;
+    }
+  };
+
+public:
   /**
    * Create a new MinFlowScheduler.
    * @param architecture is the architecture of the neutral atom system

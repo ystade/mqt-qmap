@@ -232,4 +232,218 @@ TEST(MinFlowSchedulerConfigTest, InvalidMaxFillingFactor) {
   EXPECT_THROW(MinFlowScheduler scheduler(architecture, config2),
                std::invalid_argument);
 }
+TEST(FlowNetwork, ApplyPermutation) {
+  MinFlowScheduler::FlowNetwork::IVector<
+      MinFlowScheduler::FlowNetwork::EdgeIndex, size_t>
+      data = {10, 20, 30};
+  MinFlowScheduler::FlowNetwork::applyPermutation<size_t>({2, 1, 0}, data);
+  EXPECT_THAT(data, ::testing::ElementsAre(30, 20, 10));
+  data = {10, 20, 30};
+  MinFlowScheduler::FlowNetwork::applyPermutation<
+      MinFlowScheduler::FlowNetwork::EdgeIndex>({1, 2, 0}, data);
+  EXPECT_THAT(data, ::testing::ElementsAre(30, 10, 20));
+  data = {10, 20, 30, 40};
+  MinFlowScheduler::FlowNetwork::applyPermutation<
+      MinFlowScheduler::FlowNetwork::EdgeIndex>({3, 2, 0, 1}, data);
+  EXPECT_THAT(data, ::testing::ElementsAre(30, 40, 20, 10));
+}
+TEST(FlowNetwork, PreBuildExceptions) {
+  MinFlowScheduler::FlowNetwork g;
+  EXPECT_THROW(std::ignore = g.getTarget(0), std::logic_error);
+  EXPECT_THROW(std::ignore = g.getSource(0), std::logic_error);
+  EXPECT_THROW(std::ignore = g.getReverseEdge(0), std::logic_error);
+  EXPECT_THROW(std::ignore = g.isReverseEdge(0), std::logic_error);
+  EXPECT_THROW(std::ignore = g.getSuccessors(0), std::logic_error);
+  EXPECT_THROW(std::ignore = g.getOutgoing(0), std::logic_error);
+  EXPECT_THROW(std::ignore = g.getOutDegree(0), std::logic_error);
+  EXPECT_THROW(g.solveMaxFlow(0, 1), std::logic_error);
+  EXPECT_THROW(g.solveMinCostFlow(), std::logic_error);
+}
+TEST(FlowNetwork, PostBuildExceptions) {
+  MinFlowScheduler::FlowNetwork g;
+  g.build();
+  EXPECT_THROW(std::ignore = g.getTarget(0), std::out_of_range);
+  EXPECT_THROW(std::ignore = g.getSource(0), std::out_of_range);
+  EXPECT_THROW(std::ignore = g.getReverseEdge(0), std::out_of_range);
+  EXPECT_THROW(std::ignore = g.isReverseEdge(0), std::out_of_range);
+  EXPECT_THROW(std::ignore = g.getSuccessors(0), std::out_of_range);
+  EXPECT_THROW(std::ignore = g.getOutgoing(0), std::out_of_range);
+  EXPECT_THROW(std::ignore = g.getOutDegree(0), std::out_of_range);
+}
+TEST(FlowNetwork, Empty) {
+  MinFlowScheduler::FlowNetwork g;
+  EXPECT_NO_THROW(g.build());
+  EXPECT_EQ(g.getNumVertices(), 0);
+  EXPECT_EQ(g.getNumEdges(), 0);
+}
+TEST(FlowNetwork, OneVertex) {
+  MinFlowScheduler::FlowNetwork g;
+  g.addVertexWithSupply(0);
+  EXPECT_NO_THROW(g.build());
+  EXPECT_EQ(g.getNumVertices(), 1);
+  EXPECT_EQ(g.getNumEdges(), 0);
+  EXPECT_EQ(g.getOutDegree(0), 0);
+  EXPECT_EQ(g.getSuccessors(0).size(), 0);
+}
+TEST(FlowNetwork, OneEdge) {
+  MinFlowScheduler::FlowNetwork g;
+  const auto u = g.addVertexWithSupply(0);
+  const auto v = g.addVertexWithSupply(0);
+  const auto e = g.addEdgeWithCapacityAndUnitCost(u, v, 1, 1);
+  EXPECT_NO_THROW(g.build());
+  EXPECT_EQ(g.getNumVertices(), 2);
+  EXPECT_EQ(g.getNumEdges(), 1);
+  EXPECT_EQ(g.getOutDegree(u), 1);
+  EXPECT_EQ(g.getOutDegree(v), 0);
+  EXPECT_THAT(g.getSuccessors(u), ::testing::ElementsAre(v));
+  EXPECT_THAT(g.getSuccessors(v), ::testing::IsEmpty());
+  EXPECT_EQ(g.getSource(e), u);
+  EXPECT_EQ(g.getTarget(e), v);
+  const auto re = g.getReverseEdge(e);
+  EXPECT_EQ(g.getReverseEdge(re), e);
+  EXPECT_TRUE(g.isReverseEdge(re));
+  EXPECT_FALSE(g.isReverseEdge(e));
+  EXPECT_EQ(g.getSource(re), v);
+  EXPECT_EQ(g.getTarget(re), u);
+}
+TEST(FlowNetwork, DiamondOrdered) {
+  //
+  //
+  //                 ┌───┐
+  // ┌───┐     ┌────>│ v ├─────┐     ┌───┐
+  // │ u ├─────┤     ├───┤     ├────>│ x │
+  // └───┘     └────>│ w ├─────┘     └───┘
+  //                 └───┘
+  //
+  MinFlowScheduler::FlowNetwork g;
+  const auto u = g.addVertexWithSupply(0);
+  const auto v = g.addVertexWithSupply(0);
+  const auto w = g.addVertexWithSupply(0);
+  const auto x = g.addVertexWithSupply(0);
+  auto c = g.addEdgeWithCapacityAndUnitCost(u, v, 1, 1);
+  auto d = g.addEdgeWithCapacityAndUnitCost(u, w, 1, 1);
+  auto e = g.addEdgeWithCapacityAndUnitCost(v, x, 1, 1);
+  auto f = g.addEdgeWithCapacityAndUnitCost(w, x, 1, 1);
+  MinFlowScheduler::FlowNetwork::IVector<
+      MinFlowScheduler::FlowNetwork::EdgeIndex,
+      MinFlowScheduler::FlowNetwork::EdgeIndex>
+      permutation;
+  EXPECT_NO_THROW(permutation = g.build());
+  c = permutation[c];
+  d = permutation[d];
+  e = permutation[e];
+  f = permutation[f];
+  EXPECT_EQ(g.getNumVertices(), 4);
+  EXPECT_EQ(g.getNumEdges(), 4);
+  EXPECT_EQ(g.getOutDegree(u), 2);
+  EXPECT_EQ(g.getOutDegree(v), 1);
+  EXPECT_EQ(g.getOutDegree(w), 1);
+  EXPECT_EQ(g.getOutDegree(x), 0);
+  EXPECT_THAT(g.getSuccessors(u), ::testing::UnorderedElementsAre(v, w));
+  EXPECT_THAT(g.getSuccessors(v), ::testing::UnorderedElementsAre(x));
+  EXPECT_THAT(g.getSuccessors(w), ::testing::UnorderedElementsAre(x));
+  EXPECT_THAT(g.getSuccessors(x), ::testing::IsEmpty());
+  EXPECT_EQ(g.getSource(c), u);
+  EXPECT_EQ(g.getTarget(c), v);
+  EXPECT_EQ(g.getSource(d), u);
+  EXPECT_EQ(g.getTarget(d), w);
+  EXPECT_EQ(g.getSource(e), v);
+  EXPECT_EQ(g.getTarget(e), x);
+  EXPECT_EQ(g.getSource(f), w);
+  EXPECT_EQ(g.getTarget(f), x);
+  const auto rc = g.getReverseEdge(c);
+  const auto rd = g.getReverseEdge(d);
+  const auto re = g.getReverseEdge(e);
+  const auto rf = g.getReverseEdge(f);
+  EXPECT_EQ(g.getReverseEdge(rc), c);
+  EXPECT_EQ(g.getReverseEdge(rd), d);
+  EXPECT_EQ(g.getReverseEdge(re), e);
+  EXPECT_EQ(g.getReverseEdge(rf), f);
+  EXPECT_TRUE(g.isReverseEdge(rc));
+  EXPECT_TRUE(g.isReverseEdge(rd));
+  EXPECT_TRUE(g.isReverseEdge(re));
+  EXPECT_TRUE(g.isReverseEdge(rf));
+  EXPECT_FALSE(g.isReverseEdge(c));
+  EXPECT_FALSE(g.isReverseEdge(d));
+  EXPECT_FALSE(g.isReverseEdge(e));
+  EXPECT_FALSE(g.isReverseEdge(f));
+  EXPECT_EQ(g.getSource(rc), v);
+  EXPECT_EQ(g.getSource(rd), w);
+  EXPECT_EQ(g.getSource(re), x);
+  EXPECT_EQ(g.getSource(rf), x);
+  EXPECT_EQ(g.getTarget(rc), u);
+  EXPECT_EQ(g.getTarget(rd), u);
+  EXPECT_EQ(g.getTarget(re), v);
+  EXPECT_EQ(g.getTarget(rf), w);
+}
+TEST(FlowNetwork, DiamondUnordered) {
+  //
+  //
+  //                 ┌───┐
+  // ┌───┐     ┌────>│ v ├─────┐     ┌───┐
+  // │ u ├─────┤     ├───┤     ├────>│ x │
+  // └───┘     └────>│ w ├─────┘     └───┘
+  //                 └───┘
+  //
+  MinFlowScheduler::FlowNetwork g;
+  const auto u = g.addVertexWithSupply(0);
+  const auto v = g.addVertexWithSupply(0);
+  const auto w = g.addVertexWithSupply(0);
+  const auto x = g.addVertexWithSupply(0);
+  auto f = g.addEdgeWithCapacityAndUnitCost(w, x, 1, 1);
+  auto e = g.addEdgeWithCapacityAndUnitCost(v, x, 1, 1);
+  auto d = g.addEdgeWithCapacityAndUnitCost(u, w, 1, 1);
+  auto c = g.addEdgeWithCapacityAndUnitCost(u, v, 1, 1);
+  MinFlowScheduler::FlowNetwork::IVector<
+      MinFlowScheduler::FlowNetwork::EdgeIndex,
+      MinFlowScheduler::FlowNetwork::EdgeIndex>
+      permutation;
+  EXPECT_NO_THROW(permutation = g.build());
+  f = permutation[f];
+  e = permutation[e];
+  d = permutation[d];
+  c = permutation[c];
+  EXPECT_EQ(g.getNumVertices(), 4);
+  EXPECT_EQ(g.getNumEdges(), 4);
+  EXPECT_EQ(g.getOutDegree(u), 2);
+  EXPECT_EQ(g.getOutDegree(v), 1);
+  EXPECT_EQ(g.getOutDegree(w), 1);
+  EXPECT_EQ(g.getOutDegree(x), 0);
+  EXPECT_THAT(g.getSuccessors(u), ::testing::UnorderedElementsAre(v, w));
+  EXPECT_THAT(g.getSuccessors(v), ::testing::UnorderedElementsAre(x));
+  EXPECT_THAT(g.getSuccessors(w), ::testing::UnorderedElementsAre(x));
+  EXPECT_THAT(g.getSuccessors(x), ::testing::IsEmpty());
+  EXPECT_EQ(g.getSource(c), u);
+  EXPECT_EQ(g.getTarget(c), v);
+  EXPECT_EQ(g.getSource(d), u);
+  EXPECT_EQ(g.getTarget(d), w);
+  EXPECT_EQ(g.getSource(e), v);
+  EXPECT_EQ(g.getTarget(e), x);
+  EXPECT_EQ(g.getSource(f), w);
+  EXPECT_EQ(g.getTarget(f), x);
+  const auto rc = g.getReverseEdge(c);
+  const auto rd = g.getReverseEdge(d);
+  const auto re = g.getReverseEdge(e);
+  const auto rf = g.getReverseEdge(f);
+  EXPECT_EQ(g.getReverseEdge(rc), c);
+  EXPECT_EQ(g.getReverseEdge(rd), d);
+  EXPECT_EQ(g.getReverseEdge(re), e);
+  EXPECT_EQ(g.getReverseEdge(rf), f);
+  EXPECT_TRUE(g.isReverseEdge(rc));
+  EXPECT_TRUE(g.isReverseEdge(rd));
+  EXPECT_TRUE(g.isReverseEdge(re));
+  EXPECT_TRUE(g.isReverseEdge(rf));
+  EXPECT_FALSE(g.isReverseEdge(c));
+  EXPECT_FALSE(g.isReverseEdge(d));
+  EXPECT_FALSE(g.isReverseEdge(e));
+  EXPECT_FALSE(g.isReverseEdge(f));
+  EXPECT_EQ(g.getSource(rc), v);
+  EXPECT_EQ(g.getSource(rd), w);
+  EXPECT_EQ(g.getSource(re), x);
+  EXPECT_EQ(g.getSource(rf), x);
+  EXPECT_EQ(g.getTarget(rc), u);
+  EXPECT_EQ(g.getTarget(rd), u);
+  EXPECT_EQ(g.getTarget(re), v);
+  EXPECT_EQ(g.getTarget(rf), w);
+}
 } // namespace na::zoned
