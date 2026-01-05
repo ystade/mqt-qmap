@@ -164,7 +164,7 @@ TEST_F(MinFlowSchedulerScheduleTest, Mixed) {
                              ::testing::UnorderedElementsAre(
                                  ::testing::UnorderedElementsAre(1U, 2U))));
 }
-TEST_F(MinFlowSchedulerScheduleTest, Flow) {
+TEST_F(MinFlowSchedulerScheduleTest, Flow1) {
   //          INPUT ORDER                SCHEDULED ORDER
   // q_0: ──────────■────────  >>>  ───░───░───░─■────────
   //                │                  ░   ░   ░ │
@@ -176,11 +176,11 @@ TEST_F(MinFlowSchedulerScheduleTest, Flow) {
   //       │        │                │ ░   ░   ░ │
   // q_4: ─■──■─────■────────  >>>  ─■─░───░─■─░─■────────
   //          │                        ░   ░ │ ░
-  // q_5: ─■──■──────────────  >>>  ─■─░───░─■─░──────────
-  //       │                         │ ░   ░   ░
-  // q_6: ─■──■──────────────  >>>  ─■─░─■─░───░──────────
-  //          │                        ░ │ ░   ░
-  // q_7: ────■──────────────  >>>  ───░─■─░───░──────────
+  // q_5: ─■──■──────────────  >>>  ───░─■─░─■─░──────────
+  //       │                           ░ │ ░   ░
+  // q_6: ─■──■──────────────  >>>  ───░─■─░─■─░──────────
+  //          │                        ░   ░ │ ░
+  // q_7: ────■──────────────  >>>  ───░───░─■─░──────────
   qc::QuantumComputation qc(8);
   qc.cz(3, 4);
   qc.cz(5, 6);
@@ -207,6 +207,59 @@ TEST_F(MinFlowSchedulerScheduleTest, Flow) {
                              ::testing::UnorderedElementsAre(
                                  ::testing::UnorderedElementsAre(0U, 1U),
                                  ::testing::UnorderedElementsAre(2U, 4U))));
+}
+TEST_F(MinFlowSchedulerScheduleTest, Flow2) {
+  //          INPUT ORDER                SCHEDULED ORDER
+  // q_0: ────────────────■──  >>>  ───░───░──░───░───░─■──
+  //                      │            ░   ░  ░   ░   ░ │
+  // q_1: ─────────────■──■──  >>>  ───░───░──░───░─■─░─■──
+  //                   │               ░   ░  ░   ░ │ ░
+  // q_2: ──────────■──■──■──  >>>  ───░───░──░─■─░─■─░─■──
+  //                │     │            ░   ░  ░ │ ░   ░ │
+  // q_3: ─■─────■──■─────│──  >>>  ─■─░───░─■░─■─░───░─│──
+  //       │     │        │          │ ░   ░ │░   ░   ░ │
+  // q_4: ─■──■──■────────│──  >>>  ─■─░─■─░─■░───░───░─│──
+  //          │.          │            ░ │.░  ░   ░   ░ │
+  // q_5: ─■──■──■────────│──  >>>  ─■─░─■─░──░─■─░───░─│──
+  //       │     │        │          │ ░   ░  ░ │ ░   ░ │
+  // q_6: ─■─────│────────│──  >>>  ─■─░───░──░─│─░───░─│──
+  //             │        │            ░   ░  ░ │ ░   ░ │
+  // q_7: ───────■─■──────│──  >>>  ───░───░──░─■─░─■─░─│──
+  //               │      │            ░   ░  ░   ░ │ ░ │
+  // q_8: ─────────■──────■──  >>>  ───░───░──░───░─■─░─■──
+
+  qc::QuantumComputation qc(9);
+  qc.cz(3, 4);
+  qc.cz(5, 6);
+  qc.cz(4, 5);
+  qc.cz(3, 4);
+  qc.cz(5, 7);
+  qc.cz(2, 3);
+  qc.cz(7, 8);
+  qc.cz(1, 2);
+  qc.cz(0, 1);
+  qc.cz(2, 8);
+  const auto& [singleQubitGateLayers, twoQubitGateLayers] =
+      scheduler.schedule(qc);
+  EXPECT_THAT(singleQubitGateLayers, ::testing::Each(::testing::IsEmpty()));
+  EXPECT_THAT(
+      twoQubitGateLayers,
+      ::testing::ElementsAre(::testing::UnorderedElementsAre(
+                                 ::testing::UnorderedElementsAre(3U, 4U),
+                                 ::testing::UnorderedElementsAre(5U, 6U)),
+                             ::testing::UnorderedElementsAre(
+                                 ::testing::UnorderedElementsAre(4U, 5U)),
+                             ::testing::UnorderedElementsAre(
+                                 ::testing::UnorderedElementsAre(3U, 4U)),
+                             ::testing::UnorderedElementsAre(
+                                 ::testing::UnorderedElementsAre(2U, 3U),
+                                 ::testing::UnorderedElementsAre(5U, 7U)),
+                             ::testing::UnorderedElementsAre(
+                                 ::testing::UnorderedElementsAre(1U, 2U),
+                                 ::testing::UnorderedElementsAre(7U, 8U)),
+                             ::testing::UnorderedElementsAre(
+                                 ::testing::UnorderedElementsAre(0U, 1U),
+                                 ::testing::UnorderedElementsAre(2U, 8U))));
 }
 // TEST_F(MinFlowSchedulerScheduleTest, Barrier) {
 //   // q_0: ─■─────────░───
