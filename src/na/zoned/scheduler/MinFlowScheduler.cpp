@@ -159,10 +159,10 @@ auto MinFlowScheduler::minCostFlowScheduling(
   size_t sink = source + 1;
 
   // node idx to gate idx
-  std::unordered_map<size_t, int> umNodeToGateIdx;
+  std::vector<int> vGateIdx(numGate, 0);
   size_t idx = 0;
   for (const auto& [gateIdx, qubitPair] : mGateIdxToQubitPair) {
-    umNodeToGateIdx[idx] = gateIdx;
+    vGateIdx[idx] = gateIdx;
     idx++;
   }
 
@@ -178,7 +178,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   std::map<int, size_t> nodeMap; // Maps qubits to latest gate node
 
   for (size_t nodeIdx = 0; nodeIdx < mGateIdxToQubitPair.size(); nodeIdx++) {
-    size_t gateIdxLocal = static_cast<size_t>(umNodeToGateIdx.at(nodeIdx));
+    size_t gateIdxLocal = static_cast<size_t>(vGateIdx.at(nodeIdx));
     const auto& qubitPairLocal =
         mGateIdxToQubitPair.at(static_cast<int>(gateIdxLocal));
     const auto& q1 = qubitPairLocal.first;
@@ -267,12 +267,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   for (size_t u = numGate; u < 2 * numGate; u++) {
     for (size_t v = 0; v < numGate; v++) {
       if (vFlow[u][v] > 0) {
-        // size_t inNodeGateIdx = static_cast<size_t>(umNodeToGateIdx[u -
-        // numGate]); size_t outNodeGateIdx =
-        // static_cast<size_t>(umNodeToGateIdx[v]);
-        size_t inNodeGateIdx = static_cast<size_t>(u - numGate);
-        size_t outNodeGateIdx = static_cast<size_t>(v);
-        vFlowEdge.push_back({inNodeGateIdx, outNodeGateIdx});
+        vFlowEdge.push_back({u - numGate, v});
         // std::cout << "(vFlowEdge)" << u << ", " << v << ", " << vFlow[u][v]
         // << std::endl; std::cout << inNodeGateIdx << ", " << outNodeGateIdx <<
         // std::endl;
@@ -295,7 +290,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   std::unordered_map<int, size_t> umGateToTime;
   for (size_t time = 0; time < vResultScheduling.size(); time++) {
     for (const auto& nodeIdx : vResultScheduling[time]) {
-      int gateIdx = umNodeToGateIdx[static_cast<size_t>(nodeIdx)];
+      int gateIdx = vGateIdx[static_cast<size_t>(nodeIdx)];
       umGateToTime[gateIdx] = time;
     }
   }
