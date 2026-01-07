@@ -16,10 +16,34 @@
 #include "na/zoned/scheduler/SchedulerBase.hpp"
 
 #include <functional>
+#include <queue>
+#include <stack>
 #include <utility>
 #include <vector>
 
 namespace na::zoned {
+// A wrapper to add value_type to a view that lacks it.
+template <std::ranges::view R>
+struct value_type_wrapper
+    : public std::ranges::view_interface<value_type_wrapper<R>> {
+  R r;
+
+  // Explicitly define value_type
+  using value_type = std::iter_value_t<std::ranges::iterator_t<R>>;
+
+  value_type_wrapper() = default;
+  constexpr explicit value_type_wrapper(R r) : r(std::move(r)) {}
+
+  constexpr auto begin() { return std::ranges::begin(r); }
+  constexpr auto end() { return std::ranges::end(r); }
+  constexpr auto begin() const { return std::ranges::begin(r); }
+  constexpr auto end() const { return std::ranges::end(r); }
+};
+
+// Deduction guide
+template <typename R>
+value_type_wrapper(R&&) -> value_type_wrapper<std::views::all_t<R>>;
+
 /**
  * The class MinFlowScheduler implements the min-cost flow scheduling
  * strategy for the zoned neutral atom compiler.
@@ -68,6 +92,7 @@ public:
       using std::vector<T>::begin;
       using std::vector<T>::cbegin;
       using std::vector<T>::end;
+      using std::vector<T>::cend;
       using std::vector<T>::resize;
       [[nodiscard]] auto operator[](I index) const -> const T& {
         return std::vector<T>::operator[](
@@ -90,8 +115,6 @@ public:
     //===------------------------------------------------------------------===//
     // Vertex data
     //===------------------------------------------------------------------===//
-    /// Supply of flow at each vertex; demand is expressed as negative supply.
-    IVector<VertexIndex, FlowQuantity> vertexSupply_;
     /**
      * Used to store the excess of vertices of a pre-flow during the computation
      * of the actual flow.
@@ -108,68 +131,60 @@ public:
      * whose values denote the index in the edgeTarget_ vector where the
      * successors of this vertex start.
      */
-    IVector<VertexIndex, EdgeIndex> vertexFirstOutgoingEdge_;
+    IVector<VertexIndex, EdgeIndex> vertexFirstOutgoingForwardEdge_;
     /**
-     * Every edge in the graph has a corresponding reverse edge. The following
-     * data structure is analogue to the one above.
+     * Every forward edge in the graph has a corresponding reverse backward
+     * edge. The following data structure is analogue to the one above.
      */
-    IVector<VertexIndex, EdgeIndex> vertexFirstOutgoingReverseEdge_;
+    IVector<VertexIndex, EdgeIndex> vertexFirstOutgoingBackwardEdge_;
 
     //===------------------------------------------------------------------===//
     // Edge data
     //===------------------------------------------------------------------===//
     /**
-     * Stores the target vertex of each (forward) edge. More precisely, the
-     * target vertex of the i-th edge is stored as the i-th element in the
+     * Stores the target vertex of each forward edge. More precisely, the target
+     * vertex of the i-th forward edge is stored as the i-th element in the
      * vector.
      */
     IVector<EdgeIndex, VertexIndex> edgeTarget_;
     /**
-     * Stores the target vertex of each reverse edge. More precisely, the target
-     * vertex of the i-th reverse edge is stored as the i-th element in the
-     * vector. Note that the actual indices of reverse edges are shifted by the
-     * number of (forward) edges, i.e., they start with m, where m is the number
-     * of (forward) edges. Also note that this vector is used to retrieve the
-     * source vertex of (forward) edges.
+     * Stores the target vertex of each backward edge. More precisely, the
+     * target vertex of the i-th backward edge is stored as the i-th element in
+     * the vector. Note that the actual indices of backward edges are shifted by
+     * the number of forward edges, i.e., they start with m, where m is the
+     * number of forward edges. Also note that this vector is used to retrieve
+     * the source vertex of forward edges.
      */
     IVector<EdgeIndex, VertexIndex> reverseEdgeTarget_;
     /**
-     * The capacity of each edge denotes the maximum possible flow along this
-     * (forward) edge. The capacity of the i-th edge is stored as the i-th
-     * element in this vector.
+     * The capacity of each forward edge denotes the maximum possible flow along
+     * this forward edge. The capacity of the i-th edge is stored as the i-th
+     * element in this vector. Backward edges do not have a capacity.
      */
     IVector<EdgeIndex, FlowQuantity> edgeCapacity_;
     /**
      * The unit cost is the cost per unit of flow along this forward edge. To
      * retrieve the actual cost, the unit cost is multiplied with the flow along
-     * this edge. The unit cost of the i-th edge is the i-th element in the
-     * vector.
+     * this forward edge. The unit cost of the i-th edge is the i-th element in
+     * the vector. Backward edges do not have a cost.
      */
     IVector<EdgeIndex, CostValue> edgeUnitCost_;
     /**
-     * Is used during the calculation of the flow and stores the finally
-     * calculated flow in the flow network.
+     * Stores the finally calculated flow in the flow network. During the run of
+     * the push-relabel algorithm, it contains the pre-flow.
      */
     IVector<EdgeIndex, FlowQuantity> edgeFlow_;
     /**
      * For each edge, it maps to the index of the reverse edge. Note that the
-     * indices of reverse edges start with m, where m is the number of (forward)
+     * indices of backward edges start with m, where m is the number of forward
      * edges.
      */
     IVector<EdgeIndex, EdgeIndex> reverseEdge_;
     /**
-     * Is used during the calculation of the flow and stores the current
-     * capacities along all (forward and reverse) edges in the residual graph.
-     * Note that one can derive the flow in the residual graph from its
-     * capacities as follows:
-     * - For forward edges e: flow(e) = 0 - flow(rev(e))
-     *                                = capacity(rev(e)) - flow(rev(e))
-     *                                = residualCapacity(rev(e))
-     * - For reverse edges e: flow(e) = - residualCapacity(e)
+     * During the calculation of the max flow, this queue stores all active
+     * nodes, i.e., nodes with positive excess.
      */
-    IVector<EdgeIndex, FlowQuantity> residualEdgeCapacity_;
-    // todo(yannick): add docstring
-    IVector<VertexIndex, std::optional<EdgeIndex>> firstAdmissibleEdge;
+    std::queue<VertexIndex> activeNodes_;
 
     //===------------------------------------------------------------------===//
     // Global variables
@@ -184,12 +199,11 @@ public:
   public:
     FlowNetwork() = default;
     FlowNetwork(size_t reserveNumVertices, size_t reserveNumEdges);
-
     [[nodiscard]] constexpr auto hasZeroVertices() const -> bool {
-      return vertexSupply_.empty();
+      return vertexExcess_.empty();
     }
     [[nodiscard]] constexpr auto getNumVertices() const -> VertexIndex {
-      return vertexSupply_.size();
+      return vertexExcess_.size();
     }
     [[nodiscard]] constexpr auto getNumEdges() const -> EdgeIndex {
       return edgeTarget_.size();
@@ -200,52 +214,32 @@ public:
     auto ensureNotBuilt() const -> void;
     static auto toFlowQuantityWithOverflowCheck(CapacityValue capacity)
         -> FlowQuantity;
-    [[nodiscard]] auto getOutDegree(VertexIndex v) const -> EdgeIndex;
-    [[nodiscard]] auto getOutgoing(VertexIndex v) const
+    [[nodiscard]] auto getForwardOutDegree(VertexIndex v) const -> EdgeIndex;
+    [[nodiscard]] auto getOutgoingForwardEdges(VertexIndex v) const
         -> std::ranges::iota_view<EdgeIndex, EdgeIndex>;
-    [[nodiscard]] auto getSuccessors(VertexIndex v) const
+    [[nodiscard]] auto getAllOutgoingEdges(const VertexIndex v) const -> auto {
+      ensureBuilt();
+      validateVertexIndex(v);
+      const auto forwardView = getOutgoingForwardEdges(v);
+      const auto backwardView = std::views::iota(
+          getNumEdges() + vertexFirstOutgoingBackwardEdge_[v],
+          getNumEdges() + vertexFirstOutgoingBackwardEdge_[v + 1]);
+      std::vector buffer(forwardView.begin(), forwardView.end());
+      buffer.insert(buffer.end(), backwardView.begin(), backwardView.end());
+      return buffer;
+    }
+    [[nodiscard]] auto getForwardSuccessors(VertexIndex v) const
         -> std::span<const VertexIndex>;
-    [[nodiscard]] auto isReverseEdge(EdgeIndex i) const -> bool;
+    [[nodiscard]] auto isBackwardEdge(EdgeIndex i) const -> bool;
     [[nodiscard]] auto getReverseEdge(EdgeIndex i) const -> EdgeIndex;
     [[nodiscard]] auto getSource(EdgeIndex i) const -> VertexIndex;
     [[nodiscard]] auto getTarget(EdgeIndex i) const -> VertexIndex;
-
-    auto initializePreflow(const VertexIndex source) -> void {
-      vertexExcess_.assign(getNumVertices(), 0);
-      vertexPotential_.assign(getNumVertices(), 0);
-      vertexPotential_[source] = getNumVertices();
-      residualEdgeCapacity_.clear();
-      std::ranges::for_each(edgeCapacity_,
-                            [&](const FlowQuantity capacity) -> void {
-                              residualEdgeCapacity_.emplace_back(capacity);
-                            });
-      residualEdgeCapacity_.resize(2 * getNumEdges(), 0);
-      firstAdmissibleEdge.assign(getNumVertices(), std::nullopt);
-    }
-    auto solveMaxFlow(const VertexIndex source, const VertexIndex sink)
-        -> void {
-      ensureBuilt();
-      validateVertexIndex(source);
-      validateVertexIndex(sink);
-      if (source == sink) {
-        throw std::invalid_argument("Source and sink cannot be the same.");
-      }
-      initializePreflow(source);
-      // todo(yannick) implement push relabel algorithm
-    }
-    auto addVertexWithSupply(int64_t supply) -> VertexIndex;
+    auto addVertexWithSupply(CapacityValue supply) -> VertexIndex;
+    auto addVertexWithDemand(CapacityValue demand) -> VertexIndex;
+    auto addVertex() -> VertexIndex;
     auto addEdgeWithCapacityAndUnitCost(VertexIndex source, VertexIndex target,
-                                        uint64_t capacity, int64_t unitCost)
-        -> EdgeIndex;
-    template <typename T>
-    static auto
-    applyPermutation(const IVector<EdgeIndex, EdgeIndex>& permutation,
-                     IVector<EdgeIndex, T>& data) -> void {
-      IVector<EdgeIndex, T> data_copy = data;
-      for (EdgeIndex i = 0; i < permutation.size(); ++i) {
-        data[permutation[i]] = data_copy[i];
-      }
-    }
+                                        CapacityValue capacity,
+                                        CostValue unitCost) -> EdgeIndex;
     /**
      * @brief Finalizes the graph structure for efficient access afterward.
      * @note This function must be called before calling @ref solve. Vice versa,
@@ -257,17 +251,39 @@ public:
      * iteration over outgoing edges more efficient. In particular, it makes
      * access to edges and associated data, e.g., capacity more cache efficient.
      */
-    auto build() -> IVector<EdgeIndex, EdgeIndex>;
+    auto build(IVector<EdgeIndex, EdgeIndex>& permutation) -> void;
+    auto normalizeAndBuild(IVector<EdgeIndex, EdgeIndex>& permutation)
+        -> std::pair<VertexIndex, VertexIndex>;
+    /**
+     * Applies a given permutation to a container. The size of the permutation
+     * may be less than or equal to the size of the container. In the former
+     * case, only the first elements up to the size of the permutation are
+     * permuted.
+     * @tparam T is the value type of the @ref IVector.
+     * @param permutation is the permutation to apply to the data elements.
+     * @param data is the container to be permuted.
+     */
+    template <typename T>
+    static auto
+    applyPermutation(const IVector<EdgeIndex, EdgeIndex>& permutation,
+                     IVector<EdgeIndex, T>& data) -> void {
+      IVector<EdgeIndex, T> data_copy = data;
+      for (EdgeIndex i = 0; i < permutation.size(); ++i) {
+        assert(permutation[i] < data.size());
+        data[permutation[i]] = data_copy[i];
+      }
+    }
+    auto initializePreflow(VertexIndex source) -> void;
+    auto push(EdgeIndex e) -> void;
+    auto relabel(VertexIndex u) -> void;
+    auto solveMaxFlow(VertexIndex source, VertexIndex sink) -> void;
     enum class Status {
       OPTIMAL,
       INFEASIBLE,
       UNBALANCED,
     };
     auto solveMinCostFlow() -> Status {
-      if (!isBuilt) {
-        throw std::logic_error(
-            "Call `build()` before solving the flow network.");
-      }
+      ensureBuilt();
       optimalCost = 0;
       maximumFlow_ = 0;
       // todo(yannick): implement min-cost flow algorithm
@@ -291,7 +307,7 @@ public:
   /**
    * This function schedules the operations of a quantum computation.
    * @details todo: docstring
-   * @param qc is the quantum computation
+   * @param qc is the quantum computation to be scheduled
    * @return a pair of two vectors. The first vector contains the layers of
    * single-qubit operations. The second vector contains the layers of two-qubit
    * operations. A pair of qubits represents every two-qubit operation.
