@@ -1,5 +1,5 @@
-# Copyright (c) 2023 - 2025 Chair for Design Automation, TUM
-# Copyright (c) 2025 Munich Quantum Software Company GmbH
+# Copyright (c) 2023 - 2026 Chair for Design Automation, TUM
+# Copyright (c) 2025 - 2026 Munich Quantum Software Company GmbH
 # All rights reserved.
 #
 # SPDX-License-Identifier: MIT
@@ -31,12 +31,12 @@ license = "MIT"
 license-files = ["LICENSE.md"]
 
 classifiers = [
-    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Natural Language :: English",
-    "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -46,7 +46,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Development Status :: 5 - Production/Stable",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
     "Typing :: Typed",
 ]
 requires-python = ">=3.10, != 3.14.1"
@@ -311,7 +311,10 @@ ket = "ket"
 
 
 [tool.repo-review]
-ignore = ["GH200"]
+ignore = [
+  "GH200", # We use Renovate instead of Dependabot
+  "PC160", # We use a mirror of crate-ci/typos
+]
 
 
 [tool.cibuildwheel]
@@ -364,7 +367,11 @@ repair-wheel-command = """delvewheel repair -w {dest_dir} {wheel} --namespace-pk
 
 [tool.uv]
 required-version = ">=0.5.20"
-reinstall-package = ["mqt.qmap"]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+  { file = "bindings/**/*.cpp"},
+]
 
 
 [tool.uv.sources]
