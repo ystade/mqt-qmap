@@ -83,7 +83,7 @@ def main() -> None:
         arch, **common_ids_config, routing_method=RoutingMethod.relaxed, prefer_split=1.0
     )
 
-    evaluator = Evaluator(arch_dict, "results2.csv")
+    evaluator = Evaluator(arch_dict, "results.csv")
     evaluator.print_header()
     pathlib.Path("in").mkdir(exist_ok=True)
 
