@@ -88,12 +88,12 @@ def main() -> None:
     pathlib.Path("in").mkdir(exist_ok=True)
 
     benchmark_list = [
-        # ("graphstate", (BenchmarkLevel.INDEP, [60, 80, 100, 120, 140, 160, 180, 200, 500, 1000, 2000, 5000])),
+        ("graphstate", (BenchmarkLevel.INDEP, [60, 80, 100, 120, 140, 160, 180, 200, 500, 1000, 2000, 5000])),
         ("qft", (BenchmarkLevel.INDEP, [500, 1000])),
-        # ("qpeexact", (BenchmarkLevel.INDEP, [500, 1000])),
-        # ("wstate", (BenchmarkLevel.INDEP, [500, 1000])),
-        # ("qaoa", (BenchmarkLevel.INDEP, [50, 100, 150, 200])),
-        # ("vqe_two_local", (BenchmarkLevel.INDEP, [50, 100, 150, 200])),
+        ("qpeexact", (BenchmarkLevel.INDEP, [500, 1000])),
+        ("wstate", (BenchmarkLevel.INDEP, [500, 1000])),
+        ("qaoa", (BenchmarkLevel.INDEP, [50, 100, 150, 200])),
+        ("vqe_two_local", (BenchmarkLevel.INDEP, [50, 100, 150, 200])),
     ]
 
     for benchmark, qc in benchmarks(benchmark_list):
