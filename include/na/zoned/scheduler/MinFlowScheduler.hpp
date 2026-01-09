@@ -125,7 +125,7 @@ public:
      * distance to the sink. The sink always has potential 0, and the source's
      * potential is equal to the number of vertices.
      */
-    IVector<VertexIndex, VertexIndex> vertexPotential_;
+    IVector<VertexIndex, CostValue> vertexPotential_;
     /**
      * For fast and cache-efficient access of all successors. It is a vector
      * whose values denote the index in the edgeTarget_ vector where the
@@ -189,21 +189,25 @@ public:
     //===------------------------------------------------------------------===//
     // Global variables
     //===------------------------------------------------------------------===//
+    /// Total number of vertices
+    VertexIndex numVertices_ = 0;
     /// Whether the graph is already finalized and the flow can be calculated.
     bool isBuilt = false;
-    /// The resulting optimal cost of the min-cost flow.
-    uint64_t optimalCost = 0;
+    /// The maximum cost of a forward edge
+    CostValue maxEdgeCost_ = 0;
     /// The resulting flow of the min-cost flow.
-    int64_t maximumFlow_ = 0;
+    FlowQuantity maximumFlow_ = 0;
+    // todo(yannick): add docstring
+    CostValue epsilon_ = 0;
 
   public:
     FlowNetwork() = default;
-    FlowNetwork(size_t reserveNumVertices, size_t reserveNumEdges);
+    FlowNetwork(size_t reserveNumEdges);
     [[nodiscard]] constexpr auto hasZeroVertices() const -> bool {
-      return vertexExcess_.empty();
+      return numVertices_ == 0;
     }
     [[nodiscard]] constexpr auto getNumVertices() const -> VertexIndex {
-      return vertexExcess_.size();
+      return numVertices_;
     }
     [[nodiscard]] constexpr auto getNumEdges() const -> EdgeIndex {
       return edgeTarget_.size();
@@ -224,6 +228,8 @@ public:
       const auto backwardView = std::views::iota(
           getNumEdges() + vertexFirstOutgoingBackwardEdge_[v],
           getNumEdges() + vertexFirstOutgoingBackwardEdge_[v + 1]);
+      // todo(yannick): replace with a more efficient concatenation view when
+      //  available in the standard library or write a custom one
       std::vector buffer(forwardView.begin(), forwardView.end());
       buffer.insert(buffer.end(), backwardView.begin(), backwardView.end());
       return buffer;
@@ -234,8 +240,7 @@ public:
     [[nodiscard]] auto getReverseEdge(EdgeIndex i) const -> EdgeIndex;
     [[nodiscard]] auto getSource(EdgeIndex i) const -> VertexIndex;
     [[nodiscard]] auto getTarget(EdgeIndex i) const -> VertexIndex;
-    auto addVertexWithSupply(CapacityValue supply) -> VertexIndex;
-    auto addVertexWithDemand(CapacityValue demand) -> VertexIndex;
+    [[nodiscard]] auto getFlow(EdgeIndex e) const -> FlowQuantity;
     auto addVertex() -> VertexIndex;
     auto addEdgeWithCapacityAndUnitCost(VertexIndex source, VertexIndex target,
                                         CapacityValue capacity,
@@ -252,8 +257,6 @@ public:
      * access to edges and associated data, e.g., capacity more cache efficient.
      */
     auto build(IVector<EdgeIndex, EdgeIndex>& permutation) -> void;
-    auto normalizeAndBuild(IVector<EdgeIndex, EdgeIndex>& permutation)
-        -> std::pair<VertexIndex, VertexIndex>;
     /**
      * Applies a given permutation to a container. The size of the permutation
      * may be less than or equal to the size of the container. In the former
@@ -273,27 +276,23 @@ public:
         data[permutation[i]] = data_copy[i];
       }
     }
+    [[nodiscard]] auto residualEdgeCapacity(EdgeIndex e) -> FlowQuantity;
+    [[nodiscard]] auto residualEdgeCapacityFast(EdgeIndex forwardEdge,
+                                                bool forBackwardEdge = false)
+        -> FlowQuantity;
     auto initializePreflow(VertexIndex source) -> void;
     auto push(EdgeIndex e) -> void;
     auto relabel(VertexIndex u) -> void;
+    auto discharge(VertexIndex u) -> void;
     auto solveMaxFlow(VertexIndex source, VertexIndex sink) -> void;
-    enum class Status {
-      OPTIMAL,
-      INFEASIBLE,
-      UNBALANCED,
-    };
-    auto solveMinCostFlow() -> Status {
-      ensureBuilt();
-      optimalCost = 0;
-      maximumFlow_ = 0;
-      // todo(yannick): implement min-cost flow algorithm
-      return Status::OPTIMAL;
-    }
-    [[nodiscard]] auto getOptimalCost() const -> uint64_t {
-      return optimalCost;
-    }
-    [[nodiscard]] auto getMaximumFlow() const -> int64_t {
-      return maximumFlow_;
+    auto scaleCosts() -> void;
+    auto unscaleCosts() -> void;
+    auto refine() -> void;
+    auto discharge2(VertexIndex u) -> void;
+    auto relabel2(VertexIndex u) -> void;
+    auto solveMinCostMaxFlow(VertexIndex source, VertexIndex sink) -> void;
+    [[nodiscard]] auto getMaximumFlow() const -> uint64_t {
+      return static_cast<uint64_t>(maximumFlow_);
     }
   };
 

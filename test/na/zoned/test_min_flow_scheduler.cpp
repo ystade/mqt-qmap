@@ -260,7 +260,7 @@ TEST(FlowNetwork, PreBuildExceptions) {
   EXPECT_THROW(std::ignore = g.getOutgoingForwardEdges(0), std::logic_error);
   EXPECT_THROW(std::ignore = g.getForwardOutDegree(0), std::logic_error);
   EXPECT_THROW(g.solveMaxFlow(0, 1), std::logic_error);
-  EXPECT_THROW(g.solveMinCostFlow(), std::logic_error);
+  EXPECT_THROW(g.solveMinCostMaxFlow(0, 1), std::logic_error);
 }
 TEST(FlowNetwork, PostBuildExceptions) {
   MinFlowScheduler::FlowNetwork g;
@@ -314,14 +314,11 @@ TEST(FlowNetwork, OneEdge) {
   EXPECT_EQ(g.getTarget(re), u);
 }
 TEST(FlowNetwork, DiamondOrdered) {
-  //
-  //
   //                 ┌───┐
   // ┌───┐     ┌────>│ v ├─────┐     ┌───┐
   // │ u ├─────┤     ├───┤     ├────>│ x │
   // └───┘     └────>│ w ├─────┘     └───┘
   //                 └───┘
-  //
   MinFlowScheduler::FlowNetwork g;
   const auto u = g.addVertex();
   const auto v = g.addVertex();
@@ -381,14 +378,11 @@ TEST(FlowNetwork, DiamondOrdered) {
   EXPECT_EQ(g.getTarget(rf), w);
 }
 TEST(FlowNetwork, DiamondUnordered) {
-  //
-  //
   //                 ┌───┐
   // ┌───┐     ┌────>│ v ├─────┐     ┌───┐
   // │ u ├─────┤     ├───┤     ├────>│ x │
   // └───┘     └────>│ w ├─────┘     └───┘
   //                 └───┘
-  //
   MinFlowScheduler::FlowNetwork g;
   const auto u = g.addVertex();
   const auto v = g.addVertex();
@@ -448,47 +442,75 @@ TEST(FlowNetwork, DiamondUnordered) {
   EXPECT_EQ(g.getTarget(rf), w);
 }
 TEST(FlowNetwork, MaxFlowForward) {
-  //
-  //
   //                 ┌───┐
-  // ┌─7─┐     ┌4/5─>│ v ├─4/4─┐     ┌─7─┐
+  // ┌───┐     ┌4/5─>│ v ├─4/4─┐     ┌───┐
   // │ u ├─────┤     ├───┤     ├────>│ x │
   // └───┘     └3/3─>│ w ├─3/4─┘     └───┘
   //                 └───┘
-  //
   MinFlowScheduler::FlowNetwork g;
-  const auto u = g.addVertexWithSupply(10);
+  const auto u = g.addVertex();
   const auto v = g.addVertex();
   const auto w = g.addVertex();
-  const auto x = g.addVertexWithDemand(10);
+  const auto x = g.addVertex();
   g.addEdgeWithCapacityAndUnitCost(u, v, 5, 1);
   g.addEdgeWithCapacityAndUnitCost(u, w, 3, 1);
   g.addEdgeWithCapacityAndUnitCost(v, x, 4, 1);
   g.addEdgeWithCapacityAndUnitCost(w, x, 4, 1);
   Permutation permutation;
-  const auto [source, sink] = g.normalizeAndBuild(permutation);
-  g.solveMaxFlow(source, sink);
+  g.build(permutation);
+  g.solveMaxFlow(u, x);
   EXPECT_EQ(g.getMaximumFlow(), 7);
 }
 TEST(FlowNetwork, MaxFlowCycle) {
   //                ┌────0/3─────┐
   //                v            │
-  // ┌─4─┐        ┌───┐        ┌─┴─┐        ┌─4─┐
-  // │ u ├──4/5──>│ v ├──4/6──>│ w ├──4/5──>│ x │
+  // ┌───┐        ┌───┐        ┌─┴─┐        ┌───┐
+  // │ u ├──4/5──>│ v ├──4/6──>│ w ├──4/4──>│ x │
   // └───┘        └───┘        └───┘        └───┘
-  //
   MinFlowScheduler::FlowNetwork g;
-  const auto u = g.addVertexWithSupply(4);
+  const auto u = g.addVertex();
   const auto v = g.addVertex();
   const auto w = g.addVertex();
-  const auto x = g.addVertexWithDemand(4);
+  const auto x = g.addVertex();
   g.addEdgeWithCapacityAndUnitCost(u, v, 5, 1);
   g.addEdgeWithCapacityAndUnitCost(v, w, 6, 1);
-  g.addEdgeWithCapacityAndUnitCost(w, x, 5, 1);
+  g.addEdgeWithCapacityAndUnitCost(w, x, 4, 1);
   g.addEdgeWithCapacityAndUnitCost(w, v, 3, 1);
   Permutation permutation;
-  const auto [source, sink] = g.normalizeAndBuild(permutation);
-  g.solveMaxFlow(source, sink);
+  g.build(permutation);
+  g.solveMaxFlow(u, x);
   EXPECT_EQ(g.getMaximumFlow(), 4);
+}
+TEST(FlowNetwork, MinCostMaxFlowForward) {
+  //                                       ┌───┐
+  // ┌───┐              ┌───┐     ┌2/6(2)─>│ w ├─2/5(0)─┐     ┌───┐
+  // │ u ├───5/5(1)────>│ v ├─────┤        ├───┤        ├────>│ y │
+  // └───┘              └───┘     └3/3(1)─>│ x ├─3/4(0)─┘     └───┘
+  //                                       └───┘
+  MinFlowScheduler::FlowNetwork g;
+  const auto u = g.addVertex();
+  const auto v = g.addVertex();
+  const auto w = g.addVertex();
+  const auto x = g.addVertex();
+  const auto y = g.addVertex();
+  auto a = g.addEdgeWithCapacityAndUnitCost(u, v, 5, 1);
+  auto b = g.addEdgeWithCapacityAndUnitCost(v, w, 6, 2);
+  auto c = g.addEdgeWithCapacityAndUnitCost(v, x, 3, 1);
+  auto d = g.addEdgeWithCapacityAndUnitCost(w, y, 5, 0);
+  auto e = g.addEdgeWithCapacityAndUnitCost(x, y, 4, 0);
+  Permutation permutation;
+  g.build(permutation);
+  a = permutation[a];
+  b = permutation[b];
+  c = permutation[c];
+  d = permutation[d];
+  e = permutation[e];
+  g.solveMinCostMaxFlow(u, y);
+  EXPECT_EQ(g.getMaximumFlow(), 5);
+  EXPECT_EQ(g.getFlow(a), 5);
+  EXPECT_EQ(g.getFlow(b), 2);
+  EXPECT_EQ(g.getFlow(c), 3);
+  EXPECT_EQ(g.getFlow(d), 2);
+  EXPECT_EQ(g.getFlow(e), 3);
 }
 } // namespace na::zoned

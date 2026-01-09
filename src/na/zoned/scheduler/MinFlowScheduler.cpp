@@ -30,10 +30,7 @@
 #include <vector>
 
 namespace na::zoned {
-MinFlowScheduler::FlowNetwork::FlowNetwork(const size_t reserveNumVertices,
-                                           const size_t reserveNumEdges) {
-  vertexExcess_.reserve(reserveNumVertices);
-
+MinFlowScheduler::FlowNetwork::FlowNetwork(const size_t reserveNumEdges) {
   edgeTarget_.reserve(reserveNumEdges);
   reverseEdgeTarget_.reserve(reserveNumEdges);
   edgeCapacity_.reserve(reserveNumEdges);
@@ -132,42 +129,28 @@ auto MinFlowScheduler::FlowNetwork::getTarget(const EdgeIndex i) const
   }
   return edgeTarget_[i];
 }
-auto MinFlowScheduler::FlowNetwork::normalizeAndBuild(
-    IVector<EdgeIndex, EdgeIndex>& permutation)
-    -> std::pair<VertexIndex, VertexIndex> {
-  ensureNotBuilt();
-  if (std::ranges::all_of(vertexExcess_, [](const auto s) { return s <= 0; })) {
-    throw std::invalid_argument(
-        "The flow network has no vertices with supply.");
+auto MinFlowScheduler::FlowNetwork::getFlow(EdgeIndex e) const -> FlowQuantity {
+  ensureBuilt();
+  validateEdgeIndex(e);
+  return isBackwardEdge(e) ? -edgeFlow_[getReverseEdge(e)] : edgeFlow_[e];
+}
+auto MinFlowScheduler::FlowNetwork::residualEdgeCapacity(const EdgeIndex e)
+    -> FlowQuantity {
+  if (isBackwardEdge(e)) {
+    return residualEdgeCapacityFast(getReverseEdge(e), true);
   }
-  const auto source = addVertexWithSupply(0);
-  for (VertexIndex v = 0; v < getNumVertices(); ++v) {
-    if (auto& s = vertexExcess_[v]; s > 0) {
-      addEdgeWithCapacityAndUnitCost(source, v, static_cast<CapacityValue>(s),
-                                     0);
-      s = 0;
-    }
-  }
-  if (std::ranges::all_of(vertexExcess_, [](const auto s) { return s >= 0; })) {
-    throw std::invalid_argument(
-        "The flow network has no vertices with demand.");
-  }
-  const auto sink = addVertexWithSupply(0);
-  for (VertexIndex v = 0; v < getNumVertices(); ++v) {
-    if (auto& s = vertexExcess_[v]; s < 0) {
-      addEdgeWithCapacityAndUnitCost(v, sink, -static_cast<CapacityValue>(s),
-                                     0);
-      s = 0;
-    }
-  }
-  build(permutation);
-  return {source, sink};
+  return residualEdgeCapacityFast(e, false);
+}
+auto MinFlowScheduler::FlowNetwork::residualEdgeCapacityFast(
+    const EdgeIndex forwardEdge, const bool forBackwardEdge) -> FlowQuantity {
+  return forBackwardEdge ? edgeFlow_[forwardEdge]
+                         : edgeCapacity_[forwardEdge] - edgeFlow_[forwardEdge];
 }
 auto MinFlowScheduler::FlowNetwork::initializePreflow(const VertexIndex source)
     -> void {
   vertexExcess_.assign(getNumVertices(), 0);
   vertexPotential_.assign(getNumVertices(), 0);
-  vertexPotential_[source] = getNumVertices();
+  vertexPotential_[source] = static_cast<CostValue>(getNumVertices());
   edgeFlow_.assign(getNumEdges(), 0);
   activeNodes_ = {};
   std::ranges::for_each(getOutgoingForwardEdges(source),
@@ -183,15 +166,15 @@ auto MinFlowScheduler::FlowNetwork::initializePreflow(const VertexIndex source)
 auto MinFlowScheduler::FlowNetwork::push(const EdgeIndex e) -> void {
   const auto u = getSource(e);
   const auto v = getTarget(e);
-  // rc = residual edge capacity
-  const auto rc = isBackwardEdge(e) ? edgeFlow_[reverseEdge_[e]]
-                                    : edgeCapacity_[e] - edgeFlow_[e];
-  const auto delta = std::min(vertexExcess_[u], rc);
+  const bool backwardEdge = isBackwardEdge(e);
+  const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
+  const auto delta = std::min(
+      vertexExcess_[u], residualEdgeCapacityFast(forwardEdge, backwardEdge));
   assert(delta > 0);
-  if (isBackwardEdge(e)) {
-    edgeFlow_[reverseEdge_[e]] -= delta;
+  if (backwardEdge) {
+    edgeFlow_[forwardEdge] -= delta;
   } else {
-    edgeFlow_[e] += delta;
+    edgeFlow_[forwardEdge] += delta;
   }
   vertexExcess_[u] -= delta;
   if (vertexExcess_[v] == 0) {
@@ -201,18 +184,32 @@ auto MinFlowScheduler::FlowNetwork::push(const EdgeIndex e) -> void {
 }
 
 auto MinFlowScheduler::FlowNetwork::relabel(const VertexIndex u) -> void {
-  VertexIndex minPotential = std::numeric_limits<VertexIndex>::max();
+  auto minPotential = std::numeric_limits<CostValue>::max();
   for (const auto e : getAllOutgoingEdges(u)) {
-    // rc = residual edge capacity
-    if (const auto rc = isBackwardEdge(e) ? edgeFlow_[reverseEdge_[e]]
-                                          : edgeCapacity_[e] - edgeFlow_[e];
-        rc > 0) {
+    if (residualEdgeCapacity(e) > 0) {
       const auto v = getTarget(e);
       minPotential = std::min(minPotential, vertexPotential_[v]);
     }
   }
-  assert(minPotential < std::numeric_limits<VertexIndex>::max());
+  assert(minPotential < std::numeric_limits<CostValue>::max());
   vertexPotential_[u] = minPotential + 1;
+}
+auto MinFlowScheduler::FlowNetwork::discharge(const VertexIndex u) -> void {
+  assert(vertexExcess_[u] > 0);
+  do {
+    for (const auto e : getAllOutgoingEdges(u)) {
+      if (const auto v = getTarget(e);
+          residualEdgeCapacity(e) > 0 &&
+          vertexPotential_[u] == vertexPotential_[v] + 1) {
+        push(e);
+        if (vertexExcess_[u] == 0) {
+          return;
+        }
+      }
+    }
+    assert(vertexExcess_[u] > 0);
+    relabel(u);
+  } while (vertexExcess_[u] > 0);
 }
 auto MinFlowScheduler::FlowNetwork::solveMaxFlow(const VertexIndex source,
                                                  const VertexIndex sink)
@@ -228,43 +225,105 @@ auto MinFlowScheduler::FlowNetwork::solveMaxFlow(const VertexIndex source,
   while (!activeNodes_.empty()) {
     const auto u = activeNodes_.front();
     activeNodes_.pop();
-    assert(vertexExcess_[u] > 0);
-    if (u == source || u == sink) {
-      continue;
-    }
-    for (const auto e : getAllOutgoingEdges(u)) {
-      if (const auto v = getTarget(e);
-          vertexPotential_[u] == vertexPotential_[v] + 1) {
-        push(e);
-        if (vertexExcess_[u] == 0) {
-          break;
-        }
-      }
-    }
-    if (vertexExcess_[u] > 0) {
-      activeNodes_.push(u);
-      relabel(u);
+    if (u != source && u != sink) {
+      discharge(u);
     }
   }
   assert(-vertexExcess_[source] == vertexExcess_[sink]);
   maximumFlow_ = vertexExcess_[sink];
 }
-auto MinFlowScheduler::FlowNetwork::addVertexWithSupply(
-    const CapacityValue supply) -> VertexIndex {
-  ensureNotBuilt();
-  vertexExcess_.emplace_back(toFlowQuantityWithOverflowCheck(supply));
-  return getNumVertices() - 1;
+auto MinFlowScheduler::FlowNetwork::refine() -> void {
+  for (VertexIndex u = 0; u < getNumVertices(); ++u) {
+    const auto p = vertexPotential_[u];
+    for (const auto e : getAllOutgoingEdges(u)) {
+      const auto v = getTarget(e);
+      // rc = reduced cost
+      if (const auto rc = (isBackwardEdge(e) ? -edgeUnitCost_[getReverseEdge(e)]
+                                             : edgeUnitCost_[e]) +
+                          p - vertexPotential_[v];
+          rc < 0) {
+        const auto delta = edgeCapacity_[e] - edgeFlow_[e];
+        edgeFlow_[e] = edgeCapacity_[e];
+        vertexExcess_[u] -= delta;
+        vertexExcess_[v] += delta;
+      }
+    }
+  }
+  activeNodes_ = {};
+  for (VertexIndex u = 0; u < getNumVertices(); ++u) {
+    if (vertexExcess_[u] > 0) {
+      activeNodes_.push(u);
+    }
+  }
+  while (!activeNodes_.empty()) {
+    const auto u = activeNodes_.front();
+    activeNodes_.pop();
+    discharge2(u);
+  }
 }
-auto MinFlowScheduler::FlowNetwork::addVertexWithDemand(
-    const CapacityValue demand) -> VertexIndex {
-  ensureNotBuilt();
-  vertexExcess_.emplace_back(-toFlowQuantityWithOverflowCheck(demand));
-  return getNumVertices() - 1;
+auto MinFlowScheduler::FlowNetwork::discharge2(const VertexIndex u) -> void {
+  assert(vertexExcess_[u] > 0);
+  do {
+    for (const auto e : getAllOutgoingEdges(u)) {
+      const auto v = getTarget(e);
+      if (residualEdgeCapacity(e) > 0) {
+        // rc = reduced cost
+        if (const auto rc =
+                (isBackwardEdge(e) ? -edgeUnitCost_[getReverseEdge(e)]
+                                   : edgeUnitCost_[e]) +
+                vertexPotential_[u] - vertexPotential_[v];
+            rc < 0) {
+          push(e);
+          if (vertexExcess_[u] == 0) {
+            return;
+          }
+        }
+      }
+    }
+    assert(vertexExcess_[u] > 0);
+    relabel2(u);
+  } while (vertexExcess_[u] > 0);
+}
+auto MinFlowScheduler::FlowNetwork::relabel2(const VertexIndex u) -> void {
+  auto maxPotential = std::numeric_limits<CostValue>::min();
+  for (const auto e : getAllOutgoingEdges(u)) {
+    if (residualEdgeCapacity(e) > 0) {
+      const auto v = getTarget(e);
+      maxPotential =
+          std::max(maxPotential,
+                   vertexPotential_[v] -
+                       (isBackwardEdge(e) ? -edgeUnitCost_[getReverseEdge(e)]
+                                          : edgeUnitCost_[e]) -
+                       epsilon_);
+    }
+  }
+  vertexPotential_[u] = maxPotential;
+}
+auto MinFlowScheduler::FlowNetwork::solveMinCostMaxFlow(
+    const VertexIndex source, const VertexIndex sink) -> void {
+  solveMaxFlow(source, sink);
+  vertexPotential_.assign(getNumVertices(), 0);
+  vertexExcess_[source] = 0;
+  vertexExcess_[sink] = 0;
+  scaleCosts();
+  epsilon_ = maxEdgeCost_ * static_cast<CostValue>(getNumEdges());
+  do {
+    epsilon_ = std::max(CostValue{1}, epsilon_ / 5); // magic number
+    refine();
+  } while (epsilon_ > 1);
+  unscaleCosts();
+}
+auto MinFlowScheduler::FlowNetwork::scaleCosts() -> void {
+  std::ranges::for_each(edgeUnitCost_,
+                        [this](auto& cost) { cost *= getNumVertices(); });
+}
+auto MinFlowScheduler::FlowNetwork::unscaleCosts() -> void {
+  std::ranges::for_each(edgeUnitCost_,
+                        [this](auto& cost) { cost /= getNumVertices(); });
 }
 auto MinFlowScheduler::FlowNetwork::addVertex() -> VertexIndex {
   ensureNotBuilt();
-  vertexExcess_.emplace_back(0);
-  return getNumVertices() - 1;
+  return numVertices_++;
 }
 auto MinFlowScheduler::FlowNetwork::addEdgeWithCapacityAndUnitCost(
     const VertexIndex source, const VertexIndex target,
@@ -277,6 +336,7 @@ auto MinFlowScheduler::FlowNetwork::addEdgeWithCapacityAndUnitCost(
   edgeTarget_.emplace_back(target);
   edgeCapacity_.emplace_back(toFlowQuantityWithOverflowCheck(capacity));
   edgeUnitCost_.emplace_back(unitCost);
+  maxEdgeCost_ = std::max(maxEdgeCost_, unitCost);
 
   return getNumEdges() - 1;
 }
@@ -428,8 +488,8 @@ auto MinFlowScheduler::schedule(const qc::QuantumComputation& qc) const
       }
     } else if (op->isGlobal(qc.getNqubits()) && !op->isControlled() &&
                qc.getNqubits() > 1) {
-      const auto maxNextLayerForQubit = *std::max_element(
-          nextLayerForQubit.cbegin(), nextLayerForQubit.cend());
+      const auto maxNextLayerForQubit =
+          *std::ranges::max_element(std::as_const(nextLayerForQubit));
       for (qc::Qubit q = 0; q < qc.getNqubits(); ++q) {
         nextLayerForQubit[q] = maxNextLayerForQubit;
       }
