@@ -289,6 +289,7 @@ public:
     auto unscaleCosts() -> void;
     auto refine() -> void;
     auto discharge2(VertexIndex u) -> void;
+    auto push2(EdgeIndex u) -> void;
     auto relabel2(VertexIndex u) -> void;
     auto solveMinCostMaxFlow(VertexIndex source, VertexIndex sink) -> void;
     [[nodiscard]] auto getMaximumFlow() const -> uint64_t {

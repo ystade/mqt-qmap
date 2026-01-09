@@ -513,4 +513,32 @@ TEST(FlowNetwork, MinCostMaxFlowForward) {
   EXPECT_EQ(g.getFlow(d), 2);
   EXPECT_EQ(g.getFlow(e), 3);
 }
+TEST(FlowNetwork, MinCostMaxFlowCycle) {
+  //                   ┌────0/3(1)─────┐
+  //                   v               │
+  // ┌───┐           ┌───┐           ┌─┴─┐           ┌───┐
+  // │ u ├──4/5(0)──>│ v ├──4/6(2)──>│ w ├──4/4(1)──>│ x │
+  // └───┘           └───┘           └───┘           └───┘
+  MinFlowScheduler::FlowNetwork g;
+  const auto u = g.addVertex();
+  const auto v = g.addVertex();
+  const auto w = g.addVertex();
+  const auto x = g.addVertex();
+  auto b = g.addEdgeWithCapacityAndUnitCost(u, v, 5, 0);
+  auto c = g.addEdgeWithCapacityAndUnitCost(v, w, 6, 2);
+  auto d = g.addEdgeWithCapacityAndUnitCost(w, x, 4, 1);
+  auto e = g.addEdgeWithCapacityAndUnitCost(w, v, 3, 1);
+  Permutation permutation;
+  g.build(permutation);
+  b = permutation[b];
+  c = permutation[c];
+  d = permutation[d];
+  e = permutation[e];
+  g.solveMinCostMaxFlow(u, x);
+  EXPECT_EQ(g.getMaximumFlow(), 4);
+  EXPECT_EQ(g.getFlow(b), 4);
+  EXPECT_EQ(g.getFlow(c), 4);
+  EXPECT_EQ(g.getFlow(d), 4);
+  EXPECT_EQ(g.getFlow(e), 0);
+}
 } // namespace na::zoned

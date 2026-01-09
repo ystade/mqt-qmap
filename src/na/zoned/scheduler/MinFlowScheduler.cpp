@@ -166,7 +166,7 @@ auto MinFlowScheduler::FlowNetwork::initializePreflow(const VertexIndex source)
 auto MinFlowScheduler::FlowNetwork::push(const EdgeIndex e) -> void {
   const auto u = getSource(e);
   const auto v = getTarget(e);
-  const bool backwardEdge = isBackwardEdge(e);
+  const auto backwardEdge = isBackwardEdge(e);
   const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
   const auto delta = std::min(
       vertexExcess_[u], residualEdgeCapacityFast(forwardEdge, backwardEdge));
@@ -237,13 +237,17 @@ auto MinFlowScheduler::FlowNetwork::refine() -> void {
     const auto p = vertexPotential_[u];
     for (const auto e : getAllOutgoingEdges(u)) {
       const auto v = getTarget(e);
+      const auto backwardEdge = isBackwardEdge(e);
+      const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
       // rc = reduced cost
-      if (const auto rc = (isBackwardEdge(e) ? -edgeUnitCost_[getReverseEdge(e)]
-                                             : edgeUnitCost_[e]) +
+      if (const auto rc = (backwardEdge ? -edgeUnitCost_[forwardEdge]
+                                        : edgeUnitCost_[forwardEdge]) +
                           p - vertexPotential_[v];
           rc < 0) {
-        const auto delta = edgeCapacity_[e] - edgeFlow_[e];
-        edgeFlow_[e] = edgeCapacity_[e];
+        const auto delta =
+            backwardEdge ? edgeFlow_[forwardEdge]
+                         : edgeCapacity_[forwardEdge] - edgeFlow_[forwardEdge];
+        edgeFlow_[forwardEdge] = backwardEdge ? 0 : edgeCapacity_[e];
         vertexExcess_[u] -= delta;
         vertexExcess_[v] += delta;
       }
@@ -273,7 +277,7 @@ auto MinFlowScheduler::FlowNetwork::discharge2(const VertexIndex u) -> void {
                                    : edgeUnitCost_[e]) +
                 vertexPotential_[u] - vertexPotential_[v];
             rc < 0) {
-          push(e);
+          push2(e);
           if (vertexExcess_[u] == 0) {
             return;
           }
@@ -283,6 +287,25 @@ auto MinFlowScheduler::FlowNetwork::discharge2(const VertexIndex u) -> void {
     assert(vertexExcess_[u] > 0);
     relabel2(u);
   } while (vertexExcess_[u] > 0);
+}
+auto MinFlowScheduler::FlowNetwork::push2(const EdgeIndex e) -> void {
+  const auto u = getSource(e);
+  const auto v = getTarget(e);
+  const auto backwardEdge = isBackwardEdge(e);
+  const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
+  const auto delta = std::min(
+      vertexExcess_[u], residualEdgeCapacityFast(forwardEdge, backwardEdge));
+  assert(delta > 0);
+  if (backwardEdge) {
+    edgeFlow_[forwardEdge] -= delta;
+  } else {
+    edgeFlow_[forwardEdge] += delta;
+  }
+  vertexExcess_[u] -= delta;
+  if (-delta < vertexExcess_[v] && vertexExcess_[v] <= 0) {
+    activeNodes_.push(v);
+  }
+  vertexExcess_[v] += delta;
 }
 auto MinFlowScheduler::FlowNetwork::relabel2(const VertexIndex u) -> void {
   auto maxPotential = std::numeric_limits<CostValue>::min();
