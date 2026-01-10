@@ -530,9 +530,11 @@ public:
     applyPermutation(const IVector<EdgeIndex, EdgeIndex>& permutation,
                      IVector<EdgeIndex, T>& data) -> void {
       IVector<EdgeIndex, T> data_copy = data;
-      for (EdgeIndex i = 0; i < permutation.size(); ++i) {
-        assert(permutation[i] < data.size());
-        data[permutation[i]] = data_copy[i];
+      for (EdgeIndex i = 0; i < data.size(); ++i) {
+        if (i < permutation.size()) {
+          assert(permutation[i] < data.size());
+          data[permutation[i]] = data_copy[i];
+        }
       }
     }
     /**
