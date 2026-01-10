@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run
 # Copyright (c) 2023 - 2026 Chair for Design Automation, TUM
 # Copyright (c) 2025 - 2026 Munich Quantum Software Company GmbH
 # All rights reserved.
@@ -43,7 +43,7 @@ def main() -> None:
     print("\033[32m[INFO]\033[0m Done")
 
     common_config = {
-        "log_level": "error",
+        "log_level": "info",
         "max_filling_factor": 0.9,
         "use_window": True,
         "window_min_width": 16,
