@@ -338,10 +338,10 @@ public:
         -> EdgeIndex {
       return reverseEdge_[i];
     }
-    /// @returns the tail of the given edge.
-    [[nodiscard]] auto getTail(EdgeIndex i) const -> VertexIndex;
-    /// @returns the head of the given edge.
-    [[nodiscard]] auto getHead(EdgeIndex i) const -> VertexIndex;
+    /// @returns the tail of the given edge without input validation.
+    [[nodiscard]] auto getTailFast(EdgeIndex i) const -> VertexIndex;
+    /// @returns the head of the given edge without input validation.
+    [[nodiscard]] auto getHeadFast(EdgeIndex i) const -> VertexIndex;
     /**
      * @details The residual capacity of a forward edge is equal to the
      * difference of the edge's capacity minus the current flow along the edge.
@@ -496,6 +496,10 @@ public:
     auto addEdgeWithCapacityAndUnitCost(VertexIndex source, VertexIndex target,
                                         CapacityValue capacity,
                                         CostValue unitCost) -> EdgeIndex;
+    /// @returns the tail of the given edge.
+    [[nodiscard]] auto getTail(EdgeIndex i) const -> VertexIndex;
+    /// @returns the head of the given edge.
+    [[nodiscard]] auto getHead(EdgeIndex i) const -> VertexIndex;
     /**
      * @brief Finalizes the graph structure for efficient access afterward.
      * @details This function initializes the Compressed Sparse Row (CSR) format

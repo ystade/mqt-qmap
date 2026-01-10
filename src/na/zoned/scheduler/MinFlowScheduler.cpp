@@ -94,11 +94,11 @@ auto MinFlowScheduler::FlowNetwork::getOutgoingBackwardEdges(
                           getNumEdges() +
                               vertexFirstOutgoingBackwardEdge_[v + 1]);
 }
-auto MinFlowScheduler::FlowNetwork::getTail(const EdgeIndex i) const
+auto MinFlowScheduler::FlowNetwork::getTailFast(const EdgeIndex i) const
     -> VertexIndex {
-  return getHead(getReverseEdge(i));
+  return getHeadFast(getReverseEdge(i));
 }
-auto MinFlowScheduler::FlowNetwork::getHead(const EdgeIndex i) const
+auto MinFlowScheduler::FlowNetwork::getHeadFast(const EdgeIndex i) const
     -> VertexIndex {
   if (isBackwardEdge(i)) {
     return backwardEdgeHead_[i - getNumEdges()];
@@ -156,7 +156,7 @@ auto MinFlowScheduler::FlowNetwork::initializePreFlow(const VertexIndex source)
                         [&](const EdgeIndex e) -> void {
                           const auto c = edgeCapacity_[e];
                           edgeFlow_[e] = c;
-                          const auto v = getHead(e);
+                          const auto v = getHeadFast(e);
                           vertexExcess_[v] = c;
                           vertexExcess_[source] -= c;
                           activeVertices_.push(v);
@@ -185,7 +185,7 @@ auto MinFlowScheduler::FlowNetwork::relabelHeight(const VertexIndex u) -> void {
   auto minPotential = std::numeric_limits<CostValue>::max();
   for (const auto e : getAllOutgoingEdges(u)) {
     if (residualEdgeCapacity(e) > 0) {
-      const auto v = getHead(e);
+      const auto v = getHeadFast(e);
       minPotential = std::min(minPotential, vertexPotential_[v]);
     }
   }
@@ -198,7 +198,7 @@ auto MinFlowScheduler::FlowNetwork::dischargeForMaxFlow(const VertexIndex u)
   do {
     for (const auto e : getAllOutgoingEdges(u)) {
       if (residualEdgeCapacity(e) > 0) {
-        if (const auto v = getHead(e);
+        if (const auto v = getHeadFast(e);
             vertexPotential_[u] == vertexPotential_[v] + 1) {
           pushPreFlow(e, u, v);
           if (vertexExcess_[u] == 0) {
@@ -236,7 +236,7 @@ auto MinFlowScheduler::FlowNetwork::refine() -> void {
   for (VertexIndex u = 0; u < getNumVertices(); ++u) {
     const auto p = vertexPotential_[u];
     for (const auto e : getAllOutgoingEdges(u)) {
-      const auto v = getHead(e);
+      const auto v = getHeadFast(e);
       const auto isBackward = isBackwardEdge(e);
       if (const auto forwardEdge = isBackward ? getReverseEdge(e) : e;
           reducedCostFast(forwardEdge, isBackward, p, v) < 0) {
@@ -265,7 +265,7 @@ auto MinFlowScheduler::FlowNetwork::dischargeForMinCostMaxFlow(
   do {
     for (const auto e : getAllOutgoingEdges(u)) {
       if (residualEdgeCapacity(e) > 0) {
-        if (const auto v = getHead(e); reducedCost(e, u, v) < 0) {
+        if (const auto v = getHeadFast(e); reducedCost(e, u, v) < 0) {
           pushPseudoFlow(e, u, v);
           if (vertexExcess_[u] == 0) {
             return;
@@ -303,7 +303,7 @@ auto MinFlowScheduler::FlowNetwork::relabelPrice(const VertexIndex u) -> void {
     const auto backwardEdge = isBackwardEdge(e);
     if (const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
         residualEdgeCapacityFast(forwardEdge, backwardEdge) > 0) {
-      const auto v = getHead(e);
+      const auto v = getHeadFast(e);
       maxPotential = std::max(maxPotential,
                               vertexPotential_[v] -
                                   (backwardEdge ? -edgeUnitCost_[forwardEdge]
@@ -351,6 +351,16 @@ auto MinFlowScheduler::FlowNetwork::addEdgeWithCapacityAndUnitCost(
   maxEdgeCost_ = std::max(maxEdgeCost_, unitCost);
 
   return getNumEdges() - 1;
+}
+auto MinFlowScheduler::FlowNetwork::getTail(const EdgeIndex i) const
+    -> VertexIndex {
+  validateEdgeIndex(i);
+  return getTailFast(i);
+}
+auto MinFlowScheduler::FlowNetwork::getHead(const EdgeIndex i) const
+    -> VertexIndex {
+  validateEdgeIndex(i);
+  return getHeadFast(i);
 }
 auto MinFlowScheduler::FlowNetwork::build(
     IVector<EdgeIndex, EdgeIndex>& permutation) -> void {
@@ -614,6 +624,9 @@ auto MinFlowScheduler::minCostFlowScheduling(
   for (size_t v = 0; v < sink + 1; v++) {
     g.addVertex();
   }
+  FlowNetwork::IVector<FlowNetwork::EdgeIndex, FlowNetwork::EdgeIndex>
+      gateEdges;
+  gateEdges.reserve(numGate);
 
   // Add edges with capacity and cost
   // Debug: mEdgeClassification (commented out)
@@ -627,8 +640,8 @@ auto MinFlowScheduler::minCostFlowScheduling(
   // }
   for (const auto& [costVal, edgeList] : mEdgeClassification) {
     for (const auto& edge : edgeList) {
-      g.addEdgeWithCapacityAndUnitCost(vOutNodes[edge.first], edge.second, 1,
-                                       costVal);
+      gateEdges.emplace_back(g.addEdgeWithCapacityAndUnitCost(
+          vOutNodes[edge.first], edge.second, 1, costVal));
     }
   }
 
@@ -645,6 +658,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   FlowNetwork::IVector<FlowNetwork::EdgeIndex, FlowNetwork::EdgeIndex>
       permutation;
   g.build(permutation);
+  FlowNetwork::applyPermutation(permutation, gateEdges);
   g.solveMinCostMaxFlow(source, sink);
 
   // Extract flow edges (simplified - direct flow analysis)
@@ -663,14 +677,14 @@ auto MinFlowScheduler::minCostFlowScheduling(
   // for (auto [t0, t1] : umNodeToGateIdx){
   //   std::cout << "node idx: " << t0 << ", gate idx: " << t1 << std::endl;
   // }
-  for (size_t u = numGate; u < 2 * numGate; u++) {
-    for (size_t v = 0; v < numGate; v++) {
-      if (g.getFlow(u, v) > 0) {
-        vFlowEdge.push_back({u - numGate, v});
-        // std::cout << "(vFlowEdge)" << u << ", " << v << ", " << vFlow[u][v]
-        // << std::endl; std::cout << inNodeGateIdx << ", " << outNodeGateIdx <<
-        // std::endl;
-      }
+  for (const auto e : gateEdges) {
+    if (g.getFlow(e) > 0) {
+      const auto u = g.getTail(e);
+      const auto v = g.getHead(e);
+      vFlowEdge.push_back({u - numGate, v});
+      // std::cout << "(vFlowEdge)" << u << ", " << v << ", " << vFlow[u][v]
+      // << std::endl; std::cout << inNodeGateIdx << ", " << outNodeGateIdx <<
+      // std::endl;
     }
   }
   // std::cout << "Optimal count: " << vFlowEdge.size() << std::endl;
