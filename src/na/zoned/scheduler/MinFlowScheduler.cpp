@@ -19,11 +19,13 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <queue>
+#include <spdlog/spdlog.h>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -613,11 +615,23 @@ auto MinFlowScheduler::minCostFlowScheduling(
     }
   }
 
+  SPDLOG_INFO("start scheduling");
+  auto start = std::chrono::high_resolution_clock::now();
+
   // Compute slack analysis
   std::map<int, std::vector<std::pair<size_t, size_t>>> mEdgeClassification;
   std::vector<int> vEst, vNodeSlack;
   computeSlackAnalysis(numGate, vDagAdj, vDagPred, vDagEdges,
                        mEdgeClassification, vEst, vNodeSlack);
+
+  // 2. Get the timepoint after the function returns
+  auto stop = std::chrono::high_resolution_clock::now();
+  // 3. Get the difference in timepoints and cast to desired units
+  auto duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  // Output the duration
+  SPDLOG_INFO("computeSlackAnalysis execution time: {} microseconds",
+              duration.count());
 
   // construct graph for min-cost flow
   FlowNetwork g{};
@@ -654,12 +668,22 @@ auto MinFlowScheduler::minCostFlowScheduling(
     g.addEdgeWithCapacityAndUnitCost(vOutNodes[v], sink, 1, 1);
   }
 
+  start = std::chrono::high_resolution_clock::now();
   // Solve min-cost max-flow
   FlowNetwork::IVector<FlowNetwork::EdgeIndex, FlowNetwork::EdgeIndex>
       permutation;
   g.build(permutation);
   FlowNetwork::applyPermutation(permutation, gateEdges);
   g.solveMinCostMaxFlow(source, sink);
+
+  // 2. Get the timepoint after the function returns
+  stop = std::chrono::high_resolution_clock::now();
+  // 3. Get the difference in timepoints and cast to desired units
+  duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  // Output the duration
+  SPDLOG_INFO("solveMinCostMaxFlow execution time: {} microseconds",
+              duration.count());
 
   // Extract flow edges (simplified - direct flow analysis)
   std::vector<std::pair<size_t, size_t>> vFlowEdge;
@@ -687,10 +711,20 @@ auto MinFlowScheduler::minCostFlowScheduling(
       // std::endl;
     }
   }
+  start = std::chrono::high_resolution_clock::now();
   // std::cout << "Optimal count: " << vFlowEdge.size() << std::endl;
   // Build result scheduling
   std::vector<std::vector<size_t>> vResultScheduling =
       constructNodeSchedule(vDagAdj, vFlowEdge, vEst, vNodeSlack);
+
+  // 2. Get the timepoint after the function returns
+  stop = std::chrono::high_resolution_clock::now();
+  // 3. Get the difference in timepoints and cast to desired units
+  duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  // Output the duration
+  SPDLOG_INFO("constructNodeSchedule execution time: {} microseconds",
+              duration.count());
   // Debug: vResultScheduling (commented out)
   // std::cout << "vResultScheduling: " << std::endl;
   // for (auto scheduling : vResultScheduling){
