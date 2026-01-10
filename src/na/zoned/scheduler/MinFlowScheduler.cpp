@@ -105,11 +105,30 @@ auto MinFlowScheduler::FlowNetwork::getHead(const EdgeIndex i) const
   }
   return forwardEdgeHead_[i];
 }
+auto MinFlowScheduler::FlowNetwork::getEdge(const VertexIndex u,
+                                            const VertexIndex v) const
+    -> EdgeIndex {
+  validateVertexIndex(u);
+  validateVertexIndex(v);
+  for (const auto e : getAllOutgoingEdges(u)) {
+    if (getHead(e) == v) {
+      return e;
+    }
+  }
+  std::ostringstream ss;
+  ss << "No edge between vertices " << u << " and " << v;
+  throw std::invalid_argument(ss.str());
+}
 auto MinFlowScheduler::FlowNetwork::getFlow(const EdgeIndex e) const
     -> FlowQuantity {
   ensureHasFlow();
   validateEdgeIndex(e);
   return isBackwardEdge(e) ? -edgeFlow_[getReverseEdge(e)] : edgeFlow_[e];
+}
+auto MinFlowScheduler::FlowNetwork::getFlow(const VertexIndex u,
+                                            const VertexIndex v) const
+    -> FlowQuantity {
+  return getFlow(getEdge(u, v));
 }
 auto MinFlowScheduler::FlowNetwork::getMaximumFlow() const -> uint64_t {
   ensureHasFlow();

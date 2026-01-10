@@ -342,6 +342,8 @@ public:
     [[nodiscard]] auto getTail(EdgeIndex i) const -> VertexIndex;
     /// @returns the head of the given edge.
     [[nodiscard]] auto getHead(EdgeIndex i) const -> VertexIndex;
+    /// @returns the edge for the given tail and head.
+    [[nodiscard]] auto getEdge(VertexIndex u, VertexIndex v) const -> EdgeIndex;
     /**
      * @details The residual capacity of a forward edge is equal to the
      * difference of the edge's capacity minus the current flow along the edge.
@@ -532,11 +534,21 @@ public:
       }
     }
     /**
+     * @param e is the edge.
      * @throws std::out_of_range if the edge index is invalid.
      * @throws std::logic_error if no flow has been computed.
      * @returns the flow along the given edge.
      */
     [[nodiscard]] auto getFlow(EdgeIndex e) const -> FlowQuantity;
+    /**
+     * @param u is the tail of the edge.
+     * @param v is the head of the edge.
+     * @throws std::out_of_range if the edge index is invalid.
+     * @throws std::logic_error if no flow has been computed.
+     * @returns the flow along the given edge.
+     */
+    [[nodiscard]] auto getFlow(VertexIndex u, VertexIndex v) const
+        -> FlowQuantity;
     /**
      * @throws std::logic_error if no flow has been computed.
      * @returns the maximum flow of the flow network, i.e., the total inflow
