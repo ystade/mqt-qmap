@@ -21,7 +21,6 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <queue>
 #include <sstream>
@@ -31,8 +30,8 @@
 
 namespace na::zoned {
 MinFlowScheduler::FlowNetwork::FlowNetwork(const size_t reserveNumEdges) {
-  edgeTarget_.reserve(reserveNumEdges);
-  reverseEdgeTarget_.reserve(reserveNumEdges);
+  forwardEdgeHead_.reserve(reserveNumEdges);
+  backwardEdgeHead_.reserve(reserveNumEdges);
   edgeCapacity_.reserve(reserveNumEdges);
   edgeUnitCost_.reserve(reserveNumEdges);
 }
@@ -64,6 +63,11 @@ auto MinFlowScheduler::FlowNetwork::ensureNotBuilt() const -> void {
     throw std::logic_error("The flow network has already been built.");
   }
 }
+auto MinFlowScheduler::FlowNetwork::ensureHasFlow() const -> void {
+  if (!hasFlow) {
+    throw std::logic_error("The flow network does not have any flow.");
+  }
+}
 auto MinFlowScheduler::FlowNetwork::toFlowQuantityWithOverflowCheck(
     const CapacityValue capacity) -> FlowQuantity {
   constexpr CapacityValue maxCapacity =
@@ -76,63 +80,37 @@ auto MinFlowScheduler::FlowNetwork::toFlowQuantityWithOverflowCheck(
   }
   return static_cast<FlowQuantity>(capacity);
 }
-auto MinFlowScheduler::FlowNetwork::getForwardOutDegree(
-    const VertexIndex v) const -> EdgeIndex {
-  ensureBuilt();
-  validateVertexIndex(v);
-  return vertexFirstOutgoingForwardEdge_[v + 1] -
-         vertexFirstOutgoingForwardEdge_[v];
-}
 auto MinFlowScheduler::FlowNetwork::getOutgoingForwardEdges(
     const VertexIndex v) const -> std::ranges::iota_view<EdgeIndex, EdgeIndex> {
-  ensureBuilt();
-  validateVertexIndex(v);
   return std::views::iota(vertexFirstOutgoingForwardEdge_[v],
                           vertexFirstOutgoingForwardEdge_[v + 1]);
 }
-auto MinFlowScheduler::FlowNetwork::getForwardSuccessors(
-    const VertexIndex v) const -> std::span<const VertexIndex> {
-  ensureBuilt();
-  validateVertexIndex(v);
-  using diff_t = std::iter_difference_t<decltype(edgeTarget_.begin())>;
-  const auto start_it = edgeTarget_.cbegin() +
-                        static_cast<diff_t>(vertexFirstOutgoingForwardEdge_[v]);
-  const auto end_it =
-      edgeTarget_.cbegin() +
-      static_cast<diff_t>(vertexFirstOutgoingForwardEdge_[v + 1]);
-  return {start_it, end_it};
+auto MinFlowScheduler::FlowNetwork::getOutgoingBackwardEdges(
+    const VertexIndex v) const -> std::ranges::iota_view<EdgeIndex, EdgeIndex> {
+  return std::views::iota(getNumEdges() + vertexFirstOutgoingBackwardEdge_[v],
+                          getNumEdges() +
+                              vertexFirstOutgoingBackwardEdge_[v + 1]);
 }
-auto MinFlowScheduler::FlowNetwork::isBackwardEdge(const EdgeIndex i) const
-    -> bool {
-  ensureBuilt();
-  validateEdgeIndex(i);
-  return i >= getNumEdges();
-}
-auto MinFlowScheduler::FlowNetwork::getReverseEdge(const EdgeIndex i) const
-    -> EdgeIndex {
-  ensureBuilt();
-  validateEdgeIndex(i);
-  return reverseEdge_[i];
-}
-auto MinFlowScheduler::FlowNetwork::getSource(const EdgeIndex i) const
+auto MinFlowScheduler::FlowNetwork::getTail(const EdgeIndex i) const
     -> VertexIndex {
-  ensureBuilt();
-  validateEdgeIndex(i);
-  return getTarget(getReverseEdge(i));
+  return getHead(getReverseEdge(i));
 }
-auto MinFlowScheduler::FlowNetwork::getTarget(const EdgeIndex i) const
+auto MinFlowScheduler::FlowNetwork::getHead(const EdgeIndex i) const
     -> VertexIndex {
-  ensureBuilt();
-  validateEdgeIndex(i);
   if (isBackwardEdge(i)) {
-    return reverseEdgeTarget_[i - getNumEdges()];
+    return backwardEdgeHead_[i - getNumEdges()];
   }
-  return edgeTarget_[i];
+  return forwardEdgeHead_[i];
 }
-auto MinFlowScheduler::FlowNetwork::getFlow(EdgeIndex e) const -> FlowQuantity {
-  ensureBuilt();
+auto MinFlowScheduler::FlowNetwork::getFlow(const EdgeIndex e) const
+    -> FlowQuantity {
+  ensureHasFlow();
   validateEdgeIndex(e);
   return isBackwardEdge(e) ? -edgeFlow_[getReverseEdge(e)] : edgeFlow_[e];
+}
+auto MinFlowScheduler::FlowNetwork::getMaximumFlow() const -> uint64_t {
+  ensureHasFlow();
+  return static_cast<uint64_t>(maximumFlow_);
 }
 auto MinFlowScheduler::FlowNetwork::residualEdgeCapacity(const EdgeIndex e)
     -> FlowQuantity {
@@ -143,29 +121,47 @@ auto MinFlowScheduler::FlowNetwork::residualEdgeCapacity(const EdgeIndex e)
 }
 auto MinFlowScheduler::FlowNetwork::residualEdgeCapacityFast(
     const EdgeIndex forwardEdge, const bool forBackwardEdge) -> FlowQuantity {
-  return forBackwardEdge ? edgeFlow_[forwardEdge]
-                         : edgeCapacity_[forwardEdge] - edgeFlow_[forwardEdge];
+  if (forBackwardEdge) {
+    return edgeFlow_[forwardEdge];
+  }
+  return edgeCapacity_[forwardEdge] - edgeFlow_[forwardEdge];
 }
-auto MinFlowScheduler::FlowNetwork::initializePreflow(const VertexIndex source)
+auto MinFlowScheduler::FlowNetwork::reducedCost(const EdgeIndex e,
+                                                const VertexIndex u,
+                                                const VertexIndex v)
+    -> CostValue {
+  if (isBackwardEdge(e)) {
+    return reducedCostFast(getReverseEdge(e), true, vertexPotential_[u], v);
+  }
+  return reducedCostFast(e, false, vertexPotential_[u], v);
+}
+auto MinFlowScheduler::FlowNetwork::reducedCostFast(
+    const EdgeIndex forwardEdge, const bool forBackwardEdge,
+    const CostValue tailPotential, const VertexIndex head) -> CostValue {
+  return (forBackwardEdge ? -edgeUnitCost_[forwardEdge]
+                          : edgeUnitCost_[forwardEdge]) +
+         tailPotential - vertexPotential_[head];
+}
+auto MinFlowScheduler::FlowNetwork::initializePreFlow(const VertexIndex source)
     -> void {
   vertexExcess_.assign(getNumVertices(), 0);
   vertexPotential_.assign(getNumVertices(), 0);
   vertexPotential_[source] = static_cast<CostValue>(getNumVertices());
   edgeFlow_.assign(getNumEdges(), 0);
-  activeNodes_ = {};
+  activeVertices_ = {};
   std::ranges::for_each(getOutgoingForwardEdges(source),
                         [&](const EdgeIndex e) -> void {
                           const auto c = edgeCapacity_[e];
                           edgeFlow_[e] = c;
-                          const auto v = getTarget(e);
+                          const auto v = getHead(e);
                           vertexExcess_[v] = c;
                           vertexExcess_[source] -= c;
-                          activeNodes_.push(v);
+                          activeVertices_.push(v);
                         });
 }
-auto MinFlowScheduler::FlowNetwork::push(const EdgeIndex e) -> void {
-  const auto u = getSource(e);
-  const auto v = getTarget(e);
+auto MinFlowScheduler::FlowNetwork::pushPreFlow(const EdgeIndex e,
+                                                const VertexIndex u,
+                                                const VertexIndex v) -> void {
   const auto backwardEdge = isBackwardEdge(e);
   const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
   const auto delta = std::min(
@@ -178,37 +174,38 @@ auto MinFlowScheduler::FlowNetwork::push(const EdgeIndex e) -> void {
   }
   vertexExcess_[u] -= delta;
   if (vertexExcess_[v] == 0) {
-    activeNodes_.push(v);
+    activeVertices_.push(v);
   }
   vertexExcess_[v] += delta;
 }
-
-auto MinFlowScheduler::FlowNetwork::relabel(const VertexIndex u) -> void {
+auto MinFlowScheduler::FlowNetwork::relabelHeight(const VertexIndex u) -> void {
   auto minPotential = std::numeric_limits<CostValue>::max();
   for (const auto e : getAllOutgoingEdges(u)) {
     if (residualEdgeCapacity(e) > 0) {
-      const auto v = getTarget(e);
+      const auto v = getHead(e);
       minPotential = std::min(minPotential, vertexPotential_[v]);
     }
   }
   assert(minPotential < std::numeric_limits<CostValue>::max());
   vertexPotential_[u] = minPotential + 1;
 }
-auto MinFlowScheduler::FlowNetwork::discharge(const VertexIndex u) -> void {
+auto MinFlowScheduler::FlowNetwork::dischargeForMaxFlow(const VertexIndex u)
+    -> void {
   assert(vertexExcess_[u] > 0);
   do {
     for (const auto e : getAllOutgoingEdges(u)) {
-      if (const auto v = getTarget(e);
-          residualEdgeCapacity(e) > 0 &&
-          vertexPotential_[u] == vertexPotential_[v] + 1) {
-        push(e);
-        if (vertexExcess_[u] == 0) {
-          return;
+      if (residualEdgeCapacity(e) > 0) {
+        if (const auto v = getHead(e);
+            vertexPotential_[u] == vertexPotential_[v] + 1) {
+          pushPreFlow(e, u, v);
+          if (vertexExcess_[u] == 0) {
+            return;
+          }
         }
       }
     }
     assert(vertexExcess_[u] > 0);
-    relabel(u);
+    relabelHeight(u);
   } while (vertexExcess_[u] > 0);
 }
 auto MinFlowScheduler::FlowNetwork::solveMaxFlow(const VertexIndex source,
@@ -220,64 +217,53 @@ auto MinFlowScheduler::FlowNetwork::solveMaxFlow(const VertexIndex source,
   if (source == sink) {
     throw std::invalid_argument("Source and sink cannot be the same.");
   }
-  maximumFlow_ = 0;
-  initializePreflow(source);
-  while (!activeNodes_.empty()) {
-    const auto u = activeNodes_.front();
-    activeNodes_.pop();
+  initializePreFlow(source);
+  while (!activeVertices_.empty()) {
+    const auto u = activeVertices_.front();
+    activeVertices_.pop();
     if (u != source && u != sink) {
-      discharge(u);
+      dischargeForMaxFlow(u);
     }
   }
   assert(-vertexExcess_[source] == vertexExcess_[sink]);
   maximumFlow_ = vertexExcess_[sink];
+  hasFlow = true;
 }
 auto MinFlowScheduler::FlowNetwork::refine() -> void {
   for (VertexIndex u = 0; u < getNumVertices(); ++u) {
     const auto p = vertexPotential_[u];
     for (const auto e : getAllOutgoingEdges(u)) {
-      const auto v = getTarget(e);
-      const auto backwardEdge = isBackwardEdge(e);
-      const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
-      // rc = reduced cost
-      if (const auto rc = (backwardEdge ? -edgeUnitCost_[forwardEdge]
-                                        : edgeUnitCost_[forwardEdge]) +
-                          p - vertexPotential_[v];
-          rc < 0) {
-        const auto delta =
-            backwardEdge ? edgeFlow_[forwardEdge]
-                         : edgeCapacity_[forwardEdge] - edgeFlow_[forwardEdge];
-        edgeFlow_[forwardEdge] = backwardEdge ? 0 : edgeCapacity_[e];
+      const auto v = getHead(e);
+      const auto isBackward = isBackwardEdge(e);
+      if (const auto forwardEdge = isBackward ? getReverseEdge(e) : e;
+          reducedCostFast(forwardEdge, isBackward, p, v) < 0) {
+        const auto delta = residualEdgeCapacityFast(forwardEdge, isBackward);
+        edgeFlow_[forwardEdge] = isBackward ? 0 : edgeCapacity_[e];
         vertexExcess_[u] -= delta;
         vertexExcess_[v] += delta;
       }
     }
   }
-  activeNodes_ = {};
+  activeVertices_ = {};
   for (VertexIndex u = 0; u < getNumVertices(); ++u) {
     if (vertexExcess_[u] > 0) {
-      activeNodes_.push(u);
+      activeVertices_.push(u);
     }
   }
-  while (!activeNodes_.empty()) {
-    const auto u = activeNodes_.front();
-    activeNodes_.pop();
-    discharge2(u);
+  while (!activeVertices_.empty()) {
+    const auto u = activeVertices_.front();
+    activeVertices_.pop();
+    dischargeForMinCostMaxFlow(u);
   }
 }
-auto MinFlowScheduler::FlowNetwork::discharge2(const VertexIndex u) -> void {
+auto MinFlowScheduler::FlowNetwork::dischargeForMinCostMaxFlow(
+    const VertexIndex u) -> void {
   assert(vertexExcess_[u] > 0);
   do {
     for (const auto e : getAllOutgoingEdges(u)) {
-      const auto v = getTarget(e);
       if (residualEdgeCapacity(e) > 0) {
-        // rc = reduced cost
-        if (const auto rc =
-                (isBackwardEdge(e) ? -edgeUnitCost_[getReverseEdge(e)]
-                                   : edgeUnitCost_[e]) +
-                vertexPotential_[u] - vertexPotential_[v];
-            rc < 0) {
-          push2(e);
+        if (const auto v = getHead(e); reducedCost(e, u, v) < 0) {
+          pushPseudoFlow(e, u, v);
           if (vertexExcess_[u] == 0) {
             return;
           }
@@ -285,12 +271,13 @@ auto MinFlowScheduler::FlowNetwork::discharge2(const VertexIndex u) -> void {
       }
     }
     assert(vertexExcess_[u] > 0);
-    relabel2(u);
+    relabelPrice(u);
   } while (vertexExcess_[u] > 0);
 }
-auto MinFlowScheduler::FlowNetwork::push2(const EdgeIndex e) -> void {
-  const auto u = getSource(e);
-  const auto v = getTarget(e);
+auto MinFlowScheduler::FlowNetwork::pushPseudoFlow(const EdgeIndex e,
+                                                   const VertexIndex u,
+                                                   const VertexIndex v)
+    -> void {
   const auto backwardEdge = isBackwardEdge(e);
   const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
   const auto delta = std::min(
@@ -303,46 +290,45 @@ auto MinFlowScheduler::FlowNetwork::push2(const EdgeIndex e) -> void {
   }
   vertexExcess_[u] -= delta;
   if (-delta < vertexExcess_[v] && vertexExcess_[v] <= 0) {
-    activeNodes_.push(v);
+    activeVertices_.push(v);
   }
   vertexExcess_[v] += delta;
 }
-auto MinFlowScheduler::FlowNetwork::relabel2(const VertexIndex u) -> void {
+auto MinFlowScheduler::FlowNetwork::relabelPrice(const VertexIndex u) -> void {
   auto maxPotential = std::numeric_limits<CostValue>::min();
   for (const auto e : getAllOutgoingEdges(u)) {
-    if (residualEdgeCapacity(e) > 0) {
-      const auto v = getTarget(e);
-      maxPotential =
-          std::max(maxPotential,
-                   vertexPotential_[v] -
-                       (isBackwardEdge(e) ? -edgeUnitCost_[getReverseEdge(e)]
-                                          : edgeUnitCost_[e]) -
-                       epsilon_);
+    const auto backwardEdge = isBackwardEdge(e);
+    if (const auto forwardEdge = backwardEdge ? getReverseEdge(e) : e;
+        residualEdgeCapacityFast(forwardEdge, backwardEdge) > 0) {
+      const auto v = getHead(e);
+      maxPotential = std::max(maxPotential,
+                              vertexPotential_[v] -
+                                  (backwardEdge ? -edgeUnitCost_[forwardEdge]
+                                                : edgeUnitCost_[forwardEdge]));
     }
   }
-  vertexPotential_[u] = maxPotential;
+  vertexPotential_[u] = maxPotential - epsilon_;
 }
 auto MinFlowScheduler::FlowNetwork::solveMinCostMaxFlow(
     const VertexIndex source, const VertexIndex sink) -> void {
+  // all the validation is performed by `solveMaxFlow`
   solveMaxFlow(source, sink);
   vertexPotential_.assign(getNumVertices(), 0);
+  // reset the excess of the source and sink "to keep the flow in the network".
+  // All other excesses are 0 after `solveMaxFlow`has returned.
   vertexExcess_[source] = 0;
   vertexExcess_[sink] = 0;
   scaleCosts();
   epsilon_ = maxEdgeCost_ * static_cast<CostValue>(getNumEdges());
   do {
-    epsilon_ = std::max(CostValue{1}, epsilon_ / 5); // magic number
+    // magic number 5 is taken from the literature and seems to work well
+    epsilon_ = std::max(CostValue{1}, epsilon_ / 5);
     refine();
   } while (epsilon_ > 1);
-  unscaleCosts();
 }
 auto MinFlowScheduler::FlowNetwork::scaleCosts() -> void {
   std::ranges::for_each(edgeUnitCost_,
                         [this](auto& cost) { cost *= getNumVertices(); });
-}
-auto MinFlowScheduler::FlowNetwork::unscaleCosts() -> void {
-  std::ranges::for_each(edgeUnitCost_,
-                        [this](auto& cost) { cost /= getNumVertices(); });
 }
 auto MinFlowScheduler::FlowNetwork::addVertex() -> VertexIndex {
   ensureNotBuilt();
@@ -355,8 +341,8 @@ auto MinFlowScheduler::FlowNetwork::addEdgeWithCapacityAndUnitCost(
   validateVertexIndex(source);
   validateVertexIndex(target);
 
-  reverseEdgeTarget_.emplace_back(source);
-  edgeTarget_.emplace_back(target);
+  backwardEdgeHead_.emplace_back(source);
+  forwardEdgeHead_.emplace_back(target);
   edgeCapacity_.emplace_back(toFlowQuantityWithOverflowCheck(capacity));
   edgeUnitCost_.emplace_back(unitCost);
   maxEdgeCost_ = std::max(maxEdgeCost_, unitCost);
@@ -369,61 +355,58 @@ auto MinFlowScheduler::FlowNetwork::build(
   permutation.clear();
   isBuilt = true;
   // if the graph has zero vertices, it also has zero edges, and there is
-  // nothing to build; hence, we return early
+  // nothing to build; hence, we return early.
   if (hasZeroVertices()) {
     // currently does not free unused memory in case the capacity of the
-    // vectors is > 0
+    // vectors is > 0.
     return;
   }
   // since the following vectors are considered fixed after the end of this
   // function call, we shrink the size to fit its content to release
-  // unused memory
-  vertexExcess_.shrink_to_fit();
-  edgeTarget_.shrink_to_fit();
+  // unused memory.
+  forwardEdgeHead_.shrink_to_fit();
   edgeCapacity_.shrink_to_fit();
   edgeUnitCost_.shrink_to_fit();
-  reverseEdgeTarget_.shrink_to_fit();
-
+  backwardEdgeHead_.shrink_to_fit();
   // Count the edges outgoing from each vertex to initialize the
-  // vertexFirstEdge_ vector, which will contain for each vertex the index
-  // of the first outgoing edge in the edgeTarget_ vector.
+  // vertexFirstOutgoingForwardEdge_ vector, which will contain for each vertex
+  // the index of the first outgoing edge in the forwardEdgeHead_ vector.
   vertexFirstOutgoingForwardEdge_.assign(getNumVertices() + 1, 0);
   vertexFirstOutgoingForwardEdge_.shrink_to_fit();
-  std::ranges::for_each(reverseEdgeTarget_, [&](const VertexIndex i) -> void {
+  std::ranges::for_each(backwardEdgeHead_, [&](const VertexIndex i) -> void {
     ++vertexFirstOutgoingForwardEdge_[i];
   });
   // Go through the counts and compute the exclusive prefix sum.
   std::exclusive_scan(vertexFirstOutgoingForwardEdge_.begin(),
                       vertexFirstOutgoingForwardEdge_.end(),
                       vertexFirstOutgoingForwardEdge_.begin(), EdgeIndex{0});
-  // Check the sentinel value
+  // Check the sentinel value.
   assert(vertexFirstOutgoingForwardEdge_[getNumVertices()] == getNumEdges() &&
-         "Sentinel value of vertexFirstOutgoingEdge_ is not correct.");
+         "Sentinel value of vertexFirstOutgoingForwardEdge_ is not correct.");
   // Calculate a permutation of edges to sort them by their source vertex.
-  // Note this temporarily alters the vertexFirstOutgoingEdge_ vector, whose
-  // state is restored afterward.
+  // Note this temporarily alters the vertexFirstOutgoingForwardEdge_ vector,
+  // whose state is restored afterward.
   permutation.reserve(getNumEdges());
-  std::ranges::for_each(reverseEdgeTarget_, [&](const VertexIndex i) {
+  std::ranges::for_each(backwardEdgeHead_, [&](const VertexIndex i) {
     permutation.emplace_back(vertexFirstOutgoingForwardEdge_[i]++);
   });
-  // Restore the previous state of the vertexFirstOutgoingEdge_ vector.
+  // Restore the previous state of the vertexFirstOutgoingForwardEdge_ vector.
   for (VertexIndex i = getNumVertices() - 1; i > 0; --i) {
     vertexFirstOutgoingForwardEdge_[i] = vertexFirstOutgoingForwardEdge_[i - 1];
   }
   vertexFirstOutgoingForwardEdge_[0] = 0;
   // Apply the permutation to the target vertices of the edges.
-  applyPermutation(permutation, reverseEdgeTarget_);
-  applyPermutation(permutation, edgeTarget_);
+  applyPermutation(permutation, backwardEdgeHead_);
+  applyPermutation(permutation, forwardEdgeHead_);
   applyPermutation(permutation, edgeCapacity_);
   applyPermutation(permutation, edgeUnitCost_);
-
-  // Count the reverse edges outgoing from each vertex to initialize the
-  // vertexFirstReverseEdge_ vector, which will contain for each vertex the
-  // index of the first outgoing reverse edge in the reverseEdgeTarget_
+  // Count the backward edges outgoing from each vertex to initialize the
+  // vertexFirstOutgoingBackwardEdge_ vector, which will contain for each vertex
+  // the index of the first outgoing backward edge in the backwardEdgeHead_
   // vector.
   vertexFirstOutgoingBackwardEdge_.assign(getNumVertices() + 1, 0);
   vertexFirstOutgoingBackwardEdge_.shrink_to_fit();
-  std::ranges::for_each(edgeTarget_, [&](const VertexIndex i) -> void {
+  std::ranges::for_each(forwardEdgeHead_, [&](const VertexIndex i) -> void {
     ++vertexFirstOutgoingBackwardEdge_[i];
   });
   // Go through the counts and compute the exclusive prefix sum.
@@ -432,27 +415,24 @@ auto MinFlowScheduler::FlowNetwork::build(
                       vertexFirstOutgoingBackwardEdge_.begin(), EdgeIndex{0});
   // Check the sentinel value
   assert(vertexFirstOutgoingBackwardEdge_[getNumVertices()] == getNumEdges() &&
-         "Sentinel value of vertexFirstOutgoingReverseEdge_ is not correct.");
+         "Sentinel value of vertexFirstOutgoingBackwardEdge_ is not correct.");
   // Calculate a permutation of reverse edges to sort them by their source
   // vertex. Note this temporarily alters the
-  // vertexFirstOutgoingReverseEdge_ vector, whose state is restored
-  // afterward.
+  // vertexFirstOutgoingBackwardEdge_ vector, whose state is restored afterward.
   IVector<EdgeIndex, EdgeIndex> reversePermutation;
   reversePermutation.reserve(getNumEdges());
-  std::ranges::for_each(edgeTarget_, [&](const VertexIndex i) -> void {
+  std::ranges::for_each(forwardEdgeHead_, [&](const VertexIndex i) -> void {
     reversePermutation.emplace_back(vertexFirstOutgoingBackwardEdge_[i]++);
   });
-  // Restore the previous state of the vertexFirstOutgoingReverseEdge_
-  // vector.
+  // Restore the previous state of the vertexFirstOutgoingBackwardEdge_ vector.
   for (VertexIndex i = getNumVertices() - 1; i > 0; --i) {
     vertexFirstOutgoingBackwardEdge_[i] =
         vertexFirstOutgoingBackwardEdge_[i - 1];
   }
   vertexFirstOutgoingBackwardEdge_[0] = 0;
   // Apply the permutation to the target vertices of the reverse edges.
-  applyPermutation(reversePermutation, reverseEdgeTarget_);
-  // Initialize the vector to translate between edges and their reverse
-  // edges
+  applyPermutation(reversePermutation, backwardEdgeHead_);
+  // Initialize the vector to translate between edges and their reverse edges.
   reverseEdge_.assign(2 * getNumEdges(), EdgeIndex{0});
   for (EdgeIndex i = 0; i < getNumEdges(); ++i) {
     const auto edge = permutation[i];
