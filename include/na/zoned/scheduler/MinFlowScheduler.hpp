@@ -596,9 +596,10 @@ private:
    * @param mGateIdxToQubitPair is a map from gate indices to qubit pairs
    * @return a map from gate indices to time steps (layers)
    */
-  auto minCostFlowScheduling(
-      const std::map<int, std::pair<int, int>>& mGateIdxToQubitPair) const
-      -> std::unordered_map<int, size_t>;
+  auto
+  minCostFlowScheduling(const std::map<size_t, std::pair<qc::Qubit, qc::Qubit>>&
+                            mGateIdxToQubitPair) const
+      -> std::unordered_map<size_t, size_t>;
 
   /**
    * @brief solve the min-cost max-flow problem
@@ -660,7 +661,7 @@ private:
                         const std::vector<std::pair<size_t, size_t>>& vFlowEdge,
                         const std::vector<int>& vEst,
                         const std::vector<int>& vNodeSlack) const
-      -> std::vector<std::vector<int>>;
+      -> std::vector<std::vector<size_t>>;
 
   /**
    * @brief constructs weakly connected components of the given DAG

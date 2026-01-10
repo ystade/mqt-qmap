@@ -496,8 +496,8 @@ auto MinFlowScheduler::schedule(const qc::QuantumComputation& qc) const
   }
   // collect 2q gate for scheduling
   // ! ignore barrier
-  std::map<int, std::pair<int, int>> mGateIdxToQubitPair;
-  int gateIdx = 0;
+  std::map<size_t, std::pair<qc::Qubit, qc::Qubit>> mGateIdxToQubitPair;
+  size_t gateIdx = 0;
   for (const auto& op : qc) {
     if (op->isStandardOperation()) {
       const auto& stdOp = dynamic_cast<qc::StandardOperation&>(*op);
@@ -511,7 +511,7 @@ auto MinFlowScheduler::schedule(const qc::QuantumComputation& qc) const
     }
     gateIdx++;
   }
-  std::unordered_map<int, size_t> umGateToTime;
+  std::unordered_map<size_t, size_t> umGateToTime;
   if (mGateIdxToQubitPair.size()) {
     umGateToTime = minCostFlowScheduling(mGateIdxToQubitPair);
   }
@@ -581,15 +581,15 @@ auto MinFlowScheduler::schedule(const qc::QuantumComputation& qc) const
 
 // Min cost flow scheduling
 auto MinFlowScheduler::minCostFlowScheduling(
-    const std::map<int, std::pair<int, int>>& mGateIdxToQubitPair) const
-    -> std::unordered_map<int, size_t> {
+    const std::map<size_t, std::pair<qc::Qubit, qc::Qubit>>&
+        mGateIdxToQubitPair) const -> std::unordered_map<size_t, size_t> {
 
   size_t numGate = mGateIdxToQubitPair.size();
   size_t source = 2 * numGate;
   size_t sink = source + 1;
 
   // node idx to gate idx
-  std::vector<int> vGateIdx(numGate, 0);
+  std::vector vGateIdx(numGate, 0UL);
   size_t idx = 0;
   for (const auto& [gateIdx, qubitPair] : mGateIdxToQubitPair) {
     vGateIdx[idx] = gateIdx;
@@ -605,17 +605,14 @@ auto MinFlowScheduler::minCostFlowScheduling(
   std::vector<std::vector<size_t>> vDagAdj(numGate), vDagPred(numGate);
   std::vector<std::pair<size_t, size_t>> vDagEdges;
   // generate dag
-  std::map<int, size_t> nodeMap; // Maps qubits to latest gate node
+  std::map<qc::Qubit, size_t> nodeMap; // Maps qubits to latest gate node
 
   for (size_t nodeIdx = 0; nodeIdx < mGateIdxToQubitPair.size(); nodeIdx++) {
-    size_t gateIdxLocal = static_cast<size_t>(vGateIdx.at(nodeIdx));
-    const auto& qubitPairLocal =
-        mGateIdxToQubitPair.at(static_cast<int>(gateIdxLocal));
-    const auto& q1 = qubitPairLocal.first;
-    const auto& q2 = qubitPairLocal.second;
+    const auto gateIdxLocal = vGateIdx.at(nodeIdx);
+    const auto [q1, q2] = mGateIdxToQubitPair.at(gateIdxLocal);
 
-    for (int qubit : {q1, q2}) {
-      if (nodeMap.count(qubit)) {
+    for (const auto qubit : {q1, q2}) {
+      if (nodeMap.contains(qubit)) {
         size_t prevNode = nodeMap[qubit];
         vDagAdj[prevNode].emplace_back(nodeIdx);
         vDagPred[nodeIdx].emplace_back(prevNode);
@@ -632,12 +629,10 @@ auto MinFlowScheduler::minCostFlowScheduling(
                        mEdgeClassification, vEst, vNodeSlack);
 
   // construct graph for min-cost flow
-  size_t numNodes = sink + 1;
-
-  // Create capacity and cost matrices
-  std::vector<std::vector<int>> vCap(numNodes, std::vector<int>(numNodes, 0));
-  std::vector<std::vector<int>> vCost(numNodes, std::vector<int>(numNodes, 0));
-  std::vector<std::vector<int>> vFlow(numNodes, std::vector<int>(numNodes, 0));
+  FlowNetwork g{};
+  for (size_t v = 0; v < sink + 1; v++) {
+    g.addVertex();
+  }
 
   // Add edges with capacity and cost
   // Debug: mEdgeClassification (commented out)
@@ -651,35 +646,28 @@ auto MinFlowScheduler::minCostFlowScheduling(
   // }
   for (const auto& [costVal, edgeList] : mEdgeClassification) {
     for (const auto& edge : edgeList) {
-      vCap[vOutNodes[edge.first]][edge.second] = 1;
-      vCost[vOutNodes[edge.first]][edge.second] = costVal;
+      g.addEdgeWithCapacityAndUnitCost(vOutNodes[edge.first], edge.second, 1,
+                                       costVal);
     }
   }
 
   for (size_t v = 0; v < numGate; v++) {
     // node decomposition
-    vCap[v][vOutNodes[v]] = 1;
-    vCost[v][vOutNodes[v]] = 0;
+    g.addEdgeWithCapacityAndUnitCost(v, vOutNodes[v], 1, 0);
     // source to in-node
-    vCap[source][v] = 1;
-    vCost[source][v] = 1;
+    g.addEdgeWithCapacityAndUnitCost(source, v, 1, 1);
     // out-node to sink
-    vCap[vOutNodes[v]][sink] = 1;
-    vCost[vOutNodes[v]][sink] = 1;
+    g.addEdgeWithCapacityAndUnitCost(vOutNodes[v], sink, 1, 1);
   }
-  // source to sink
-  vCap[source][sink] = static_cast<int>(numGate);
-  vCost[source][sink] = 1;
 
   // Solve min-cost max-flow
-  bool success = solveMinCostMaxFlow(vCap, vCost, vFlow, source, sink, numGate);
+  FlowNetwork::IVector<FlowNetwork::EdgeIndex, FlowNetwork::EdgeIndex>
+      permutation;
+  g.build(permutation);
+  g.solveMinCostMaxFlow(source, sink);
 
   // Extract flow edges (simplified - direct flow analysis)
   std::vector<std::pair<size_t, size_t>> vFlowEdge;
-
-  if (!success) {
-    // std::cout << "No optimal solution found." << std::endl;
-  }
 
   // Debug: flow matrix and mappings (commented out)
   // std::cout << "Flow matrix:" << std::endl;
@@ -696,7 +684,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   // }
   for (size_t u = numGate; u < 2 * numGate; u++) {
     for (size_t v = 0; v < numGate; v++) {
-      if (vFlow[u][v] > 0) {
+      if (g.getFlow(u, v) > 0) {
         vFlowEdge.push_back({u - numGate, v});
         // std::cout << "(vFlowEdge)" << u << ", " << v << ", " << vFlow[u][v]
         // << std::endl; std::cout << inNodeGateIdx << ", " << outNodeGateIdx <<
@@ -706,7 +694,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   }
   // std::cout << "Optimal count: " << vFlowEdge.size() << std::endl;
   // Build result scheduling
-  std::vector<std::vector<int>> vResultScheduling =
+  std::vector<std::vector<size_t>> vResultScheduling =
       constructNodeSchedule(vDagAdj, vFlowEdge, vEst, vNodeSlack);
   // Debug: vResultScheduling (commented out)
   // std::cout << "vResultScheduling: " << std::endl;
@@ -717,10 +705,10 @@ auto MinFlowScheduler::minCostFlowScheduling(
   //   std::cout << std::endl;
   // }
   // map gate idx to time step
-  std::unordered_map<int, size_t> umGateToTime;
+  std::unordered_map<size_t, size_t> umGateToTime;
   for (size_t time = 0; time < vResultScheduling.size(); time++) {
     for (const auto& nodeIdx : vResultScheduling[time]) {
-      int gateIdx = vGateIdx[static_cast<size_t>(nodeIdx)];
+      const auto gateIdx = vGateIdx[nodeIdx];
       umGateToTime[gateIdx] = time;
     }
   }
@@ -1006,7 +994,7 @@ auto MinFlowScheduler::constructNodeSchedule(
     const std::vector<std::vector<size_t>>& vDagAdj,
     const std::vector<std::pair<size_t, size_t>>& vFlowEdge,
     const std::vector<int>& vEst, const std::vector<int>& vNodeSlack) const
-    -> std::vector<std::vector<int>> {
+    -> std::vector<std::vector<size_t>> {
   size_t numGates = vEst.size();
 
   // Build flow graph
@@ -1214,17 +1202,16 @@ auto MinFlowScheduler::constructNodeSchedule(
   // Build result scheduling
   size_t numStage = static_cast<size_t>(
       *std::max_element(vNodeTime.begin(), vNodeTime.end()) + 1);
-  std::vector<std::vector<int>> vResultScheduling(numStage);
+  std::vector<std::vector<size_t>> vResultScheduling(numStage);
 
   for (size_t i = 0; i < vNodeTime.size(); i++) {
-    vResultScheduling[static_cast<size_t>(vNodeTime[i])].push_back(
-        static_cast<int>(i));
+    vResultScheduling[static_cast<size_t>(vNodeTime[i])].push_back(i);
   }
 
   // handle the case where #gates in the stage exceeds the entangling zone
   // capacity e.g., maxTwoQubitGateNumPerLayer_ = 2 stage 0: [g0, g1, g2] ->
   // stage 0: [g0, g1], stage 1: [g2]
-  std::vector<std::vector<int>> vFinalScheduling;
+  std::vector<std::vector<size_t>> vFinalScheduling;
   for (const auto& stage : vResultScheduling) {
     if (stage.size() <= maxTwoQubitGateNumPerLayer_) {
       vFinalScheduling.emplace_back(stage);
@@ -1234,7 +1221,7 @@ auto MinFlowScheduler::constructNodeSchedule(
       while (startIdx < totalGates) {
         size_t endIdx =
             std::min(startIdx + maxTwoQubitGateNumPerLayer_, totalGates);
-        std::vector<int> subStage(
+        std::vector subStage(
             stage.begin() + static_cast<std::ptrdiff_t>(startIdx),
             stage.begin() + static_cast<std::ptrdiff_t>(endIdx));
         vFinalScheduling.emplace_back(subStage);
