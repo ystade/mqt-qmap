@@ -673,7 +673,8 @@ auto MinFlowScheduler::minCostFlowScheduling(
   FlowNetwork::IVector<FlowNetwork::EdgeIndex, FlowNetwork::EdgeIndex>
       permutation;
   g.build(permutation);
-  FlowNetwork::applyPermutation(permutation, gateEdges);
+  std::ranges::for_each(
+      gateEdges, [&permutation](auto& e) -> void { e = permutation[e]; });
   g.solveMinCostMaxFlow(source, sink);
 
   // 2. Get the timepoint after the function returns
