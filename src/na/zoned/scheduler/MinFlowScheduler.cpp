@@ -28,7 +28,6 @@
 #include <spdlog/spdlog.h>
 #include <sstream>
 #include <stdexcept>
-#include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -483,10 +482,6 @@ MinFlowScheduler::MinFlowScheduler(const Architecture& architecture,
 auto MinFlowScheduler::schedule(const qc::QuantumComputation& qc) const
     -> std::pair<std::vector<SingleQubitGateLayer>,
                  std::vector<TwoQubitGateLayer>> {
-  // wait for input from the user
-  SPDLOG_INFO("PID: {}. Press Enter to continue.", getpid());
-  std::cin.get();
-
   if (qc.empty()) {
     // early exit if there are no operations to schedule
     return std::pair{std::vector<SingleQubitGateLayer>{},
