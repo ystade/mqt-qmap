@@ -580,6 +580,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   size_t numGate = mGateIdxToQubitPair.size();
   size_t source = 2 * numGate;
   size_t sink = source + 1;
+  size_t sourcesSource = source + 2;
 
   // node idx to gate idx
   std::vector vGateIdx(numGate, 0UL);
@@ -635,7 +636,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
 
   // construct graph for min-cost flow
   FlowNetwork g{};
-  for (size_t v = 0; v < sink + 1; v++) {
+  for (size_t v = 0; v < sink + 2; v++) {
     g.addVertex();
   }
   FlowNetwork::IVector<FlowNetwork::EdgeIndex, FlowNetwork::EdgeIndex>
@@ -667,6 +668,10 @@ auto MinFlowScheduler::minCostFlowScheduling(
     // out-node to sink
     g.addEdgeWithCapacityAndUnitCost(vOutNodes[v], sink, 1, 1);
   }
+  // source to sink
+  g.addEdgeWithCapacityAndUnitCost(source, sink, numGate, 1);
+  // source's source to source
+  g.addEdgeWithCapacityAndUnitCost(sourcesSource, source, numGate, 0);
 
   start = std::chrono::high_resolution_clock::now();
   // Solve min-cost max-flow
@@ -675,7 +680,7 @@ auto MinFlowScheduler::minCostFlowScheduling(
   g.build(permutation);
   std::ranges::for_each(
       gateEdges, [&permutation](auto& e) -> void { e = permutation[e]; });
-  g.solveMinCostMaxFlow(source, sink);
+  g.solveMinCostMaxFlow(sourcesSource, sink);
 
   // 2. Get the timepoint after the function returns
   stop = std::chrono::high_resolution_clock::now();
